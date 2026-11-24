@@ -130,22 +130,31 @@ def path_clis() -> list[str]:
     return out
 
 
-def reads_the_brain(path: str) -> bool:
-    """Whether `path` can open the brain with the secret this process has.
-    The CLI lists no build features, so this asks it: `info` on the brain,
-    read-only. A build without the `keychain` feature fails on a key brain
-    with "none in this build"; that's the one failure that rules it out. A
-    scratch brain opened with MNEMO_PASSPHRASE needs no keychain, so it
-    isn't asked."""
+def reads_the_brain(path: str) -> str | None:
+    """Why `path` can't open the brain with the secret this process has, or
+    None when it can. The CLI lists no build features, so this asks it:
+    `info` on the brain, read-only. A build without the `keychain` feature
+    fails on a key brain with "none in this build"; that's the one failure
+    that rules it out. A timeout is told apart (G16): after a new binary is
+    installed, macOS asks again for the keychain, and `info` waits on that
+    prompt. A scratch brain opened with MNEMO_PASSPHRASE needs no keychain,
+    so it isn't asked."""
     if optional_passphrase() or not MNEMO_PATH.is_file():
-        return True
+        return None
     try:
         r = subprocess.run(
             [path, "info", str(MNEMO_PATH)], capture_output=True, text=True, timeout=60
         )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return not (r.returncode != 0 and "none in this build" in r.stderr)
+    except subprocess.TimeoutExpired:
+        return (
+            "timed out reading the brain's key: approve the keychain prompt "
+            "for this binary, then run this again"
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"could not run it: {e}"
+    if r.returncode != 0 and "none in this build" in r.stderr:
+        return "no keychain in this build"
+    return None
 
 
 def mnemo_cli() -> str:
@@ -171,15 +180,24 @@ def mnemo_cli() -> str:
         if not v or v < MIN_CLI:
             seen.append(f"{c} ({label}, too old)")
             continue
-        if not reads_the_brain(c):
-            seen.append(f"{c} ({label}, no keychain in this build)")
+        why = reads_the_brain(c)
+        if why:
+            seen.append(f"{c} ({label}, {why})")
             continue
         _CLI = c
         return c
+    found = "(found: " + (", ".join(seen) or "none") + ")"
+    if any("timed out" in s for s in seen):
+        # G16: a keychain prompt is open; installing another build won't help.
+        sys.exit(
+            "no mnemo CLI read the brain's key in time " + found + ". macOS is "
+            "likely asking whether this mnemo may use the keychain: approve the "
+            "prompt, then run this again"
+        )
     sys.exit(
-        "no mnemo CLI at v0.15 or later that can read the brain's key (found: "
-        + (", ".join(seen) or "none")
-        + "). Install one: curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh, "
+        "no mnemo CLI at v0.15 or later that can read the brain's key "
+        + found
+        + ". Install one: curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh, "
         "or build: cd mnemo && cargo build --release --features keychain,embed-candle, "
         "or set MNEMO_BIN"
     )

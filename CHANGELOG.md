@@ -168,7 +168,7 @@ aren't published in this release: they stay at 0.20.0.
   the conflict copies settled, each flagged record's key, task slug or
   finding id (`conflict_labels`; the CLI's table lists the first ten
   flagged records) and each input's claims and presence (`local`, which
-  the output takes from the first and the counts leave out). Refused,
+  the output takes from the first and the merged count leaves out). Refused,
   with the reason and what to do: not one brain (two separate brains,
   not copies of one), different embedders (`mnemo reembed` one copy),
   dimensions or float-vector settings, an input older than format 9 or
@@ -229,6 +229,9 @@ aren't published in this release: they stay at 0.20.0.
   writes that time too, rather than keeping an input's own, so files whose
   two times differ (any written before this) merge to the same records in
   every order.
+- **`about`'s header says "1 snapshot", "1 fact", "1 turn" and "1
+  memory"** (v0210-6b): a count of one took the plural, as in a merged
+  file's "1 snapshots".
 - **`about` keeps one order for onboarding entries tied on importance and
   creation time** (v0210-4b): entries written in the same second with the
   same importance came out in a different order on each open; they now go

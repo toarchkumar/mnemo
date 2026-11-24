@@ -4012,7 +4012,7 @@ fn compact_file_with_key(py: Python<'_>, path: &str, key: &[u8]) -> PyResult<PyO
 /// tombstones), `settled` (conflict copies settled since, ids),
 /// `conflict_labels` (a flagged record's key, task slug or finding id, by
 /// id) and `local` (each input's claims and presence, which the output
-/// takes from `a` and the counts leave out). Raises
+/// takes from `a` and the merged count leaves out). Raises
 /// `InvalidArgumentError` with the reason when the merge is refused (not
 /// one brain, different embedders, a copy older than format 9, an output
 /// that exists).
