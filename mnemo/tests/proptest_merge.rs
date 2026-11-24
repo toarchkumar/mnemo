@@ -385,6 +385,7 @@ fn mirrored(r: &MergeReport) -> MergeReport {
     std::mem::swap(&mut m.a_only, &mut m.b_only);
     m.lead_ms.swap(0, 1);
     m.hlc_since.swap(0, 1);
+    m.local.swap(0, 1);
     for k in &mut m.kept_keys {
         k.deleted_in = k.deleted_in.other();
     }

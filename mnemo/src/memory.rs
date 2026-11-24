@@ -403,6 +403,11 @@ pub const HLC_PREV_KEEP: usize = 8;
 /// both differ, a task or finding both inputs moved to different statuses,
 /// a renamed task or finding, or a conflict copy.
 pub const MNEMO_META_MERGE_CONFLICT: &str = "_mnemo.merge_conflict";
+/// v0.21.0 (REV-019.1): a key's version a merge flagged that a later write
+/// settled (`true`): this build's write of the version, or a new version of
+/// its key written over the version a merge put after it. A merge counts it
+/// as a version a write follows, so it's never flagged again.
+pub const MNEMO_META_MERGE_SETTLED: &str = "_mnemo.merge_settled";
 /// v0.21.0 (13.7): on a merge's conflict copy, the id of the record whose
 /// other version it holds. A tombstone for that id removes the copy too.
 pub const MNEMO_META_MERGE_SOURCE: &str = "_mnemo.merge_source";

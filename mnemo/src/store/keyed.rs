@@ -251,6 +251,7 @@ impl Mnemo {
                 .metadata
                 .insert(MNEMO_META_INVALID_AT.into(), Value::Number(now.into()));
             // keep prev_mut.id so `put` overwrites in place.
+            let walk_from = prev_mut.clone();
             self.put(prev_mut)?;
             // Update caches incrementally.
             if let Some(k) = self.key_index.as_mut() {
@@ -259,6 +260,7 @@ impl Mnemo {
             if let Some(s) = self.superseded.as_mut() {
                 s.insert(prev_id_u);
             }
+            self.settle_merged_before(&walk_from)?;
             return Ok((new_id, WriteOutcome::Superseded));
         }
 
@@ -695,6 +697,55 @@ impl Mnemo {
     }
 
     // --- Phase 12.7a: thread archive --------------------------------
+}
+
+/// REV-019.1: how far back a new version of a key looks for versions a
+/// merge flagged.
+const SETTLE_REACH: usize = 64;
+
+impl Mnemo {
+    /// REV-019.1: a new version of a key, written over `from`, settles the
+    /// versions a merge flagged ahead of `from` in the key's chain: going
+    /// back from `from` while each step is a link a merge made (the later
+    /// version has `_mnemo.merge_linked`), at most [`SETTLE_REACH`] steps.
+    /// Each flagged one is written again, which clears its flag and marks
+    /// it settled (`_mnemo.merge_settled`). An older build's write settles
+    /// nothing, as an older build wouldn't.
+    fn settle_merged_before(&mut self, from: &Memory) -> Result<()> {
+        if self.hlc_clock.older_build {
+            return Ok(());
+        }
+        let mut cur = from.clone();
+        for _ in 0..SETTLE_REACH {
+            if !cur
+                .metadata
+                .contains_key(crate::memory::MNEMO_META_MERGE_LINKED)
+            {
+                break;
+            }
+            let Some(p) = cur
+                .metadata
+                .get(MNEMO_META_SUPERSEDES)
+                .and_then(|v| v.as_str())
+                .and_then(|s| Ulid::from_string(s).ok())
+            else {
+                break;
+            };
+            let Some(idx) = self.index.get(p.0, &self.catalog) else {
+                break;
+            };
+            let entry = self.catalog[idx].clone();
+            if entry.deleted {
+                break;
+            }
+            let m = self.read_memory(&entry)?;
+            if crate::memory::is_merge_conflict(&m) {
+                self.put(m.clone())?;
+            }
+            cur = m;
+        }
+        Ok(())
+    }
 }
 
 /// RB-013.2: a keyed write that gives no visibility (or no review date)

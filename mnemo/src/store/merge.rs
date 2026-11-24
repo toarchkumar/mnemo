@@ -27,10 +27,10 @@ use super::*;
 use crate::memory::{
     finding_status, task_status, MNEMO_META_FINDING_ID, MNEMO_META_FIRST_HLC,
     MNEMO_META_MERGE_CONFLICT, MNEMO_META_MERGE_HEADS, MNEMO_META_MERGE_LINKED,
-    MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_MERGE_STATUS_CONFLICT,
-    MNEMO_META_OWNER, MNEMO_META_READY_SEEN_BY, MNEMO_META_SEEN_BY, MNEMO_META_SLUG,
-    MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_TOMBSTONE_AFTER,
-    MNEMO_META_TOMBSTONE_SUPERSEDES,
+    MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SETTLED, MNEMO_META_MERGE_SOURCE,
+    MNEMO_META_MERGE_STATUS_CONFLICT, MNEMO_META_OWNER, MNEMO_META_READY_SEEN_BY,
+    MNEMO_META_SEEN_BY, MNEMO_META_SLUG, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
+    MNEMO_META_TOMBSTONE_AFTER, MNEMO_META_TOMBSTONE_SUPERSEDES,
 };
 
 /// One input of the rules: its live records (with vectors and access
@@ -223,35 +223,6 @@ fn same_record(a: &Memory, b: &Memory) -> bool {
             .iter()
             .zip(&b.metadata)
             .all(|((kx, x), (ky, y))| kx == ky && same_json(x, y))
-}
-
-/// RB-020.4: one version of a key, held by two inputs that differ only in
-/// what the key's chain sets again from what was written. An older build
-/// writes a key's next version by marking the one before in place, with no
-/// stamp (`_mnemo.superseded_by`, `_mnemo.invalid_at`), so two copies look
-/// like concurrent edits; and a version an older build wrote has no stamp
-/// or version, so a merge's relinking of it (its link, its mark, its flag)
-/// can't be told from an edit either. What was written is the same: its
-/// text and fields, and what it was written over.
-fn only_marks_differ(a: &Memory, b: &Memory) -> bool {
-    if !matches!(kind(a), Kind::Fact | Kind::Manifest)
-        || !a.metadata.contains_key(MNEMO_META_KEY)
-        || !b.metadata.contains_key(MNEMO_META_KEY)
-    {
-        return false;
-    }
-    if stamp(a).is_none() && stamp(b).is_none() {
-        return same_record(&written_core(a), &written_core(b));
-    }
-    let strip = |m: &Memory| {
-        let mut c = m.clone();
-        c.metadata.remove(MNEMO_META_SUPERSEDED_BY);
-        c.metadata.remove(MNEMO_META_INVALID_AT);
-        c.accessed_at = 0;
-        c.access_count = 0;
-        c
-    };
-    same_record(&strip(a), &strip(b))
 }
 
 /// What a merge may change after it places a record (its key's links and
@@ -953,6 +924,7 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 kept[i].push(m);
             }
         }
+        report.local[i] = kept[i].iter().filter(|m| kind(m) == Kind::Local).count();
     }
     report.dropped = dropped.len();
 
@@ -1145,15 +1117,6 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                     out.insert(id, body);
                     continue;
                 }
-                if only_marks_differ(&x, &y) {
-                    let mut body = if wins(&x, &y) { x.clone() } else { y.clone() };
-                    body.accessed_at = x.accessed_at.max(y.accessed_at);
-                    body.access_count = x.access_count.max(y.access_count);
-                    out.insert(id, body);
-                    sides[0].held.insert(id, x);
-                    sides[1].held.insert(id, y);
-                    continue;
-                }
                 let r = resolve(&x, &y);
                 if let Some(c) = r.conflict {
                     *conflicts.entry(c.to_string()).or_default() += 1;
@@ -1269,6 +1232,22 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         .into_iter()
         .filter(|u| out.contains_key(u))
         .map(Ulid)
+        .collect();
+    report.conflict_labels = report
+        .conflict_ids
+        .iter()
+        .filter_map(|u| {
+            let m = &out[&u.0];
+            if m.metadata.contains_key(MNEMO_META_MERGE_SOURCE) {
+                return None;
+            }
+            let label = match kind(m) {
+                Kind::Task => format!("task {}", meta_str(m, MNEMO_META_SLUG)?),
+                Kind::Finding => format!("finding {}", meta_str(m, MNEMO_META_FINDING_ID)?),
+                _ => format!("key {}", meta_str(m, MNEMO_META_KEY)?),
+            };
+            Some((*u, label))
+        })
         .collect();
     (out.into_values().collect(), report)
 }
@@ -1555,8 +1534,12 @@ fn relink_slots(
                 .collect();
             // The versions nothing written follows (no version, kept or
             // deleted, was written over them).
+            // A version a later write settled counts as one a write
+            // follows (REV-019.1).
             let written_after = |n: u128| {
-                !gone_after(n).is_empty() || members.iter().any(|&m| over_of(m) == Some(n))
+                !gone_after(n).is_empty()
+                    || members.iter().any(|&m| over_of(m) == Some(n))
+                    || out[&n].metadata.contains_key(MNEMO_META_MERGE_SETTLED)
             };
             // Less one holding the text of a version a write followed: the
             // same change made in two copies is no conflict, and stays none
@@ -1626,9 +1609,10 @@ fn relink_slots(
             .iter()
             .copied()
             .filter(|n| {
-                links[n]
-                    .2
-                    .is_some_and(|x| !out.contains_key(&x) && merged_after.get(&x) == Some(n))
+                !out[n].metadata.contains_key(MNEMO_META_MERGE_SETTLED)
+                    && links[n]
+                        .2
+                        .is_some_and(|x| !out.contains_key(&x) && merged_after.get(&x) == Some(n))
                     && (out[n].metadata.contains_key(MNEMO_META_MERGE_CONFLICT)
                         || sides.iter().any(|s| {
                             s.held
@@ -2256,9 +2240,9 @@ impl Mnemo {
             };
             match r {
                 Err(MnemoError::NeedsWriteOpen { reason }) => Err(refuse(format!(
-                    "input {label} ({}) needs a read-write open first ({reason}): \
-                     `mnemo index {}` opens it read-write, which recovers it and leaves its \
-                     records as they are; then merge again",
+                    "input {label} ({}) has work a process left unfinished ({reason}): \
+                     `mnemo verify --recover {}` finishes it with one read-write open, which \
+                     changes no record; then merge again",
                     p.display(),
                     p.display()
                 ))),
@@ -2295,9 +2279,12 @@ impl Mnemo {
                 i.as_ref().map_or("none".to_string(), |i| i.describe())
             };
             return Err(refuse(format!(
-                "the inputs' embedders differ: a {}, b {}",
+                "the inputs' embedders differ: a {}, b {}. Embed one copy again with the \
+                 other's (`mnemo reembed {}`: with no flags for the built-in embedder, or \
+                 `--embed-cmd` and `--embed-name` for another), then merge again",
                 d(&ia),
-                d(&ib)
+                d(&ib),
+                b.display()
             )));
         }
         let input_a = da.merge_input()?;
@@ -2311,8 +2298,9 @@ impl Mnemo {
         if !same_salt && !same_manifest {
             let m = |x: Option<u128>| x.map_or("no manifest".into(), |u| Ulid(u).to_string());
             return Err(refuse(format!(
-                "{} and {} aren't copies of one brain: their salts differ, and their manifests \
-                 are {} and {}",
+                "{} and {} aren't copies of one brain: a merge combines two copies of one \
+                 file that changed apart, and these are two separate brains (their salts \
+                 differ, and their manifests are {} and {})",
                 a.display(),
                 b.display(),
                 m(ma),

@@ -1734,6 +1734,22 @@ impl Mnemo {
             {
                 m.metadata.remove(crate::memory::MNEMO_META_MERGE_CONFLICT);
             }
+            // REV-019.1: a write to a fact a merge flagged (the record, a
+            // conflict copy, a key's version) settles it at once. A key's
+            // version is marked settled too: its flag comes from the key's
+            // chain, which a merge computes again, and a settled version
+            // counts there as one a write follows.
+            if !m.metadata.contains_key(MNEMO_META_KIND)
+                && m.metadata
+                    .remove(crate::memory::MNEMO_META_MERGE_CONFLICT)
+                    .is_some()
+                && m.metadata.contains_key(crate::memory::MNEMO_META_KEY)
+            {
+                m.metadata.insert(
+                    crate::memory::MNEMO_META_MERGE_SETTLED.into(),
+                    Value::Bool(true),
+                );
+            }
             // A new record's links are its own write's
             // (decision.v0210-chain-rule). A rewrite in place keeps the mark,
             // since the link it marks is unchanged.
