@@ -145,7 +145,8 @@ fn the_copies_match() {
         "integrations/gemini/GEMINI.md",
     ] {
         assert!(
-            read(rel) == skill,
+            // A Windows checkout may turn LF into CRLF, as `tests/guide.rs` allows.
+            read(rel).replace("\r\n", "\n") == skill,
             "{rel} is stale: run `mnemo onboard --guide --format plugin-skill > {rel}` from the \
              repository root"
         );
