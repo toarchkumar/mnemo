@@ -136,22 +136,35 @@ note says so plainly. Teams handle it with key slots (section 9).
 
 ## 7. Merging
 
-13.7's rules, applied one change set at a time:
+The rules `mnemo merge` shipped with in v0.21.0 (spec.v0210 and the
+decisions it names), applied one change set at a time:
 - **Records:** union by ULID.
-- **A key written on two replicas since they last synced:** the newest
-  (HLC) is live, the other is superseded and stamped
+- **A key written on two replicas since they last synced:** the key's
+  versions form one chain, ordered by which version was written over which,
+  and by the first-written stamp only between versions with no such link.
+  The last is live; the other is superseded and stamped
   `_mnemo.merge_conflict`, and both stay in the key's history.
-  `mnemo inspect` and `about` show the conflicts.
-- **A delete against an edit:** for a keyed fact, the newest action wins,
-  delete or write. For an unkeyed record, a delete wins, since there's
-  nothing newer to keep.
+  `mnemo inspect` and `about` show the conflicts (decision.v0210-chain-rule).
+- **A delete against an edit:** a delete removes exactly the record it
+  named, with no clock. A newer version of the same key that the deleting
+  replica never saw is kept, and the report names the key
+  (decision.v0210-merge-rules, which replaced "the newest action wins").
 - **Thread turns:** union by `turn_id`.
 - **Essence items:** per item, the newest change wins. "Resolved" beats a
   concurrent "open", unless the "open" came after it.
-- **Tasks:** the status histories are unioned and the newest status wins.
-  Two replicas taking the same task at once is the one real conflict; it's
-  flagged, and the Planner sorts it out. Claims don't sync, so a claim
-  never crosses machines.
+- **Tasks:** the status comes from the last history entry that changed it;
+  a note never sets it. When both replicas moved it to different statuses,
+  the later move wins and the task is flagged
+  (decision.v0210-task-status). Claims don't sync, so a claim never
+  crosses machines.
+- **Settling a conflict:** a user's write to a flagged record settles it,
+  and the flag goes at once (REV-019.1). This matters more under
+  continuous sync than for an occasional `mnemo merge`, since flags would
+  otherwise pile up.
+- **For change sets (step 3):** consider carrying explicit operations
+  (put, supersede, update, delete, a task's move) with (replica, sequence,
+  stamp), replayed in place so local snapshots survive, and keeping
+  `mnemo merge` as the offline whole-file fallback (REV-017.3, REV-019.4).
 - **Findings:** the same as tasks, with 13a's transitions checked again
   after the merge.
 - **The index** takes the new facts through the normal insert path, or is
