@@ -29,3 +29,14 @@ cc 6e5fb2a2f558f3a737ffd648d8ec1ad2804d686252d007dec74fed2730214810 # shrinks to
 cc bd1071264f0445992169b4595e20207dcaaf7461adb95db37037323aae84a496 # shrinks to ops_a = [], ops_b = [ThreadForget, Forget(178), ForgetKeyed(1), EssenceResolve, TaskAdd(2)], ops_c = [ForgetKeyed(2), Turn(3), EssenceResolve, Turn(3), ThreadForget], ops_d = [EssenceEdit(0), Remember(243), Turn(0)], ca = 1, cb = 1, cc = -3600000, cd = 0
 cc c0ae0d010bd5923f176614d9ab6f550312ddb768c226c83fdeee980ffd2df598 # shrinks to ops_a = [], ops_b = [Edit(4, 1)], ops_c = [], ops_d = [Edit(184, 0)], ca = 0, cb = 0, cc = 0, cd = 0
 cc fd93c00157de7d2f769b431c59743add508cc90730f0d0ef05aeb9c07d71307c # shrinks to ops_a = [Keyed(0, 0)], ops_b = [Keyed(0, 0)], ca = 0, cb = 0
+cc 8fed478f8390a3821f16fcaf53e46370e8f7dc8ac33fcb302e01d47a4a1b54d2 # shrinks to ops_a = [], ops_b = [], ops_x = [OlderForget(0), OlderForget(0)], ca = 0, cb = 0
+cc df536c29c3243fae97334c214abba1fcb119f4da40c7af37f44f0a7576fb780e # shrinks to ops_a = [Keyed(1, 0)], ops_b = [OlderKeyed(1, 0)], ops_x = [ForgetKeyed(1)], ca = 0, cb = 0
+cc fe20b6074347fb37aa56a839113069b16ec0bec078fb7b3274a0f77c60f77ff4 # shrinks to ops_a = [OlderKeyed(0, 0)], ops_b = [], ops_c = [], ops_d = [OlderKeyed(0, 1)], ca = 0, cb = 0, cc = 0, cd = 0
+cc d38297cc3ba6ad3d449e020d5c494a52fde8953940ca100e94cf6dab84fcec04 # shrinks to ops_a = [EssenceEdit(0)], ops_b = [EssenceEdit(1)], ops_x = [EssenceEdit(1)], ca = 3600000, cb = 0
+cc 71685bce3f03c63aeb5ee9c64d57d2f56483622dfb8c98cd2f56eae88492265b # shrinks to ops_a = [OlderForget(0)], ops_b = [], ops_c = [], ops_d = [OlderForget(0)], ca = 0, cb = 0, cc = 0, cd = 0
+cc f324e342f9dd8154faf6d86d5824fb674310620dbe8ad761c2da18ba06e3bce4 # shrinks to ops_a = [OlderKeyed(0, 0)], ops_b = [OlderKeyed(0, 0)], ops_x = [Keyed(0, 0)], ca = 0, cb = 0
+cc df9fb1267e90d7ea614b0db5b2d00eebe01d24d16ff48b786c31a1884e38991e # shrinks to ops_a = [OlderForget(0), Forget(0)], ops_b = [], ops_c = [], ops_d = [Forget(0)], ca = 0, cb = 0, cc = 0, cd = 0
+cc ccd5d703f971f5f1878bfb4afaba262b31f78ad2357b6cd6352c656318e5db3f # shrinks to ops_a = [Keyed(0, 0), ForgetKeyed(0), OlderKeyed(0, 3)], ops_b = [Remember(52)], ca = 0, cb = 0
+cc bbed7afbdb87a64b96cf3c54c88c8fdc589d4f10657706b81d8878626c82f421 # shrinks to ops_a = [OlderKeyed(0, 0)], ops_b = [OlderKeyed(0, 0)], ops_c = [], ops_d = [ForgetKeyed(0)], ca = 0, cb = 0, cc = 0, cd = 0
+cc 39e50cfa924ca1fcc754b7448a9e7e83b4dcce861bc90dd8d5bc20ceb0d4d870 # shrinks to ops_a = [Edit(234, 3), Turn(2), TaskAdd(1)], ops_b = [TaskTake, Turn(2), Keyed(0, 239), Edit(27, 1), AckAll], ops_x = [Edit(100, 3)], ca = 3600000, cb = 3600000
+cc 112dca39660e0c7f2f54079b023556d50490df702bb691b8331b2900d092939f # shrinks to ops_a = [Keyed(0, 0)], ops_b = [], ops_c = [OlderKeyed(0, 0)], ops_d = [OlderKeyed(0, 0)], ca = -3600000, cb = 0, cc = 0, cd = 0

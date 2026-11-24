@@ -5,6 +5,7 @@
 #
 #   cargo test --test merge_v0_20_2 -- --ignored   # the v0.21 inputs, first
 #   cd mnemo/tests/fixtures/v0_20_2/generator && cargo run --locked
+#   (`cargo run --locked -- keyed` writes keyed.mnemo only)
 #
 # Not part of the mnemo workspace: its own `[workspace]` table keeps it out.
 [package]

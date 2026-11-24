@@ -785,6 +785,7 @@ def test_merge_files():
         assert r["removed"] == [gone], r
         assert r["conflicts"] == {} and r["conflict_ids"] == [], r
         assert len(r["lead_ms"]) == 2 and len(r["hlc_since"]) == 2, r
+        assert r["older_deletes"] == 0 and r["settled"] == [], r
         db = mnemo.open(out, "pw")
         assert db.get(xa)["content"] == "written in a"
         assert db.get(xb)["content"] == "written in b"

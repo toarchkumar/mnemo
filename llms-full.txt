@@ -312,7 +312,21 @@ merge flags the conflict: `about` counts the flagged records and
 `mnemo inspect` lists them. The output opens with the first copy's
 secret; give a copy rekeyed since its own with `--b-passphrase` or
 `--b-key-file`. Merge copies, not the brain in use: each input is held
-for readers for the whole merge, so a session can't write to it.
+for readers while it's read, so a session can't write to it.
+
+A fact edited in both copies comes out twice: the newer edit as the
+record and the other as a flagged conflict copy. To settle it, forget the
+copy you don't want (the MCP `forget` tool, with its id), or edit the
+record to say what it should: its copy then goes at the next merge, and
+the report counts it as settled. Forgetting the record instead keeps the
+copy, which then stands alone.
+
+Copies an older build (before v0.21) wrote to merge too, with two limits.
+A delete it made is known only while the copy still holds the deleted
+row: a compaction drops those, and so does a commit once a quarter of the
+rows are deleted. And when it writes a key this build wrote in that copy
+while the copy's clock ran ahead, the merge may put its version first,
+since an older build's write has no stamp to say it came after.
 
 ## 5. Hooks and MCP extras
 
