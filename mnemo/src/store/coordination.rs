@@ -1656,63 +1656,212 @@ impl Mnemo {
             .chain(ready.into_iter().map(|i| (i, false)))
             .chain(others.iter().map(|t| (t.id, true)))
         {
-            let mut m = self.get(&id)?;
-            let t = Task::from_memory(&m).expect("a task");
-            let (token, expires_at) =
-                match self.claim(&task_topic(&t.slug), Some(TASK_CLAIM_TTL))? {
-                    ClaimOutcome::Claimed { token, expires_at } => (token, expires_at),
-                    ClaimOutcome::HeldBy { .. } => continue,
-                };
-            // The claim's write may have changed the catalog: read the task
-            // again before changing it.
-            m = self.get(&id)?;
-            let old = t.owner.clone();
-            let own = old.as_deref() == Some(agent.as_str());
-            if back && own {
-                Self::task_history(
-                    &mut m,
-                    &t.status,
-                    task_status::ACTIVE,
-                    &agent,
-                    now,
-                    &[("note", "taken again after its claim lapsed")],
-                );
-            } else if back {
-                let from = old.clone().unwrap_or_default();
-                Self::task_history(
-                    &mut m,
-                    &t.status,
-                    task_status::ACTIVE,
-                    &agent,
-                    now,
-                    &[("reclaimed_from", from.as_str())],
-                );
-            } else {
-                Self::task_history(
-                    &mut m,
-                    task_status::QUEUED,
-                    task_status::ACTIVE,
-                    &agent,
-                    now,
-                    &[],
-                );
+            if let Ok(taken) = self.take_one(id, back, &agent, now)? {
+                return Ok(Some(taken));
             }
-            m.metadata.insert(
-                MNEMO_META_STATUS.into(),
-                Value::String(task_status::ACTIVE.into()),
-            );
-            m.metadata
-                .insert(MNEMO_META_OWNER.into(), Value::String(agent.clone()));
-            self.put(m)?;
-            let task = Task::from_memory(&self.get(&id)?).expect("a task");
-            return Ok(Some(TaskTaken {
-                task,
-                token,
-                expires_at,
-                reclaimed_from: if back && !own { old } else { None },
-            }));
         }
         Ok(None)
+    }
+
+    /// v0.21.1 (G17): take the task `slug` names, as [`Mnemo::task_next`]
+    /// takes one, for this handle's author: the same `task:<slug>` claim
+    /// (its token and expiry), `active` and the owner. For an agent of
+    /// `role` when the task is for one. A `queued` task is taken when every
+    /// task in its `after` is `done`; an `active` or `blocked` one only when
+    /// its owner's claim has lapsed (taken back, as `next` does). Refuses a
+    /// `ready` or `done` task, one whose `after` tasks aren't done (naming
+    /// them), and one whose claim is live.
+    pub fn task_take(&mut self, slug: &str, role: Option<&str>) -> Result<TaskTaken> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let agent = self.claim_agent()?;
+        let now = self.coordination_now();
+        let Some(m) = self.task_record(slug)? else {
+            return Err(MnemoError::Invalid(format!("no task {slug:?}")));
+        };
+        let t = Task::from_memory(&m).expect("a task");
+        if !t.for_role(role) {
+            return Err(MnemoError::Invalid(format!(
+                "{slug} is for role {}, not {}",
+                t.role.as_deref().unwrap_or("any"),
+                role.unwrap_or("no role")
+            )));
+        }
+        let back = match t.status.as_str() {
+            task_status::QUEUED => {
+                let mut waiting = Vec::new();
+                for a in &t.after {
+                    let done = self
+                        .task_record(a)?
+                        .and_then(|m| Task::from_memory(&m))
+                        .is_some_and(|d| d.status == task_status::DONE);
+                    if !done {
+                        waiting.push(a.as_str());
+                    }
+                }
+                if !waiting.is_empty() {
+                    return Err(MnemoError::Invalid(format!(
+                        "{slug} waits for {} to be done",
+                        waiting.join(", ")
+                    )));
+                }
+                false
+            }
+            task_status::ACTIVE | task_status::BLOCKED => true,
+            other => {
+                return Err(MnemoError::Invalid(format!(
+                    "{slug} is {other}: there's nothing to take"
+                )))
+            }
+        };
+        match self.take_one(t.id, back, &agent, now)? {
+            Ok(taken) => Ok(taken),
+            Err((holder, expires_at)) => Err(MnemoError::Invalid(format!(
+                "{slug} is {}'s: its claim is {holder}'s until {}",
+                t.owner.as_deref().unwrap_or(holder.as_str()),
+                crate::memory::date_time_of(expires_at)
+            ))),
+        }
+    }
+
+    /// v0.21.1 (G17): change the tasks `slug` waits for, as its creator
+    /// (the agent that added it), at any status but `done`. Each slug in
+    /// `after` must name a task, never this one, and none may close a cycle
+    /// (a task that waits, through its own `after`, for this one). An empty
+    /// `after` waits for nothing. The change goes in its history as a note
+    /// (`after: a, b`, or `after: none`); `Unchanged` when it's the same.
+    pub fn task_set_after(&mut self, slug: &str, after: &[String]) -> Result<(Task, WriteOutcome)> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let agent = self.author.clone().unwrap_or_else(|| "anonymous".into());
+        let now = self.coordination_now();
+        let Some(mut m) = self.task_record(slug)? else {
+            return Err(MnemoError::Invalid(format!("no task {slug:?}")));
+        };
+        let t = Task::from_memory(&m).expect("a task");
+        if agent != t.creator {
+            return Err(MnemoError::Invalid(format!(
+                "{slug} is {}'s task: only its creator changes what it waits for",
+                t.creator
+            )));
+        }
+        if t.status == task_status::DONE {
+            return Err(MnemoError::Invalid(format!(
+                "{slug} is done: what it waited for no longer matters"
+            )));
+        }
+        let mut list: Vec<String> = Vec::new();
+        for a in after {
+            let a = a.trim();
+            if a.is_empty() || list.iter().any(|x| x == a) {
+                continue;
+            }
+            if a == slug {
+                return Err(MnemoError::Invalid("a task can't wait for itself".into()));
+            }
+            if self.task_record(a)?.is_none() {
+                return Err(MnemoError::Invalid(format!("after: no task {a:?}")));
+            }
+            list.push(a.to_string());
+        }
+        if list == t.after {
+            return Ok((t, WriteOutcome::Unchanged));
+        }
+        if self.closes_cycle(slug, &list)? {
+            return Err(MnemoError::Invalid(format!(
+                "after: that would make {slug} wait for itself, through the tasks it waits for"
+            )));
+        }
+        let note = if list.is_empty() {
+            "after: none".to_string()
+        } else {
+            format!("after: {}", list.join(", "))
+        };
+        Self::task_history(
+            &mut m,
+            &t.status,
+            &t.status,
+            &agent,
+            now,
+            &[("note", &note)],
+        );
+        m.metadata.insert(
+            MNEMO_META_AFTER.into(),
+            Value::Array(list.into_iter().map(Value::String).collect()),
+        );
+        let id = m.id;
+        self.put(m)?;
+        let t = Task::from_memory(&self.get(&id)?).expect("a task");
+        Ok((t, WriteOutcome::Updated))
+    }
+
+    /// Claim the task `id` and make it `agent`'s and `active` (`back`: it
+    /// was `active` or `blocked`, so the history says it was taken again or
+    /// taken back). `Err((holder, expiry))` when its claim is held.
+    fn take_one(
+        &mut self,
+        id: Ulid,
+        back: bool,
+        agent: &str,
+        now: i64,
+    ) -> Result<std::result::Result<TaskTaken, (String, i64)>> {
+        let agent = agent.to_string();
+        let mut m = self.get(&id)?;
+        let t = Task::from_memory(&m).expect("a task");
+        let (token, expires_at) = match self.claim(&task_topic(&t.slug), Some(TASK_CLAIM_TTL))? {
+            ClaimOutcome::Claimed { token, expires_at } => (token, expires_at),
+            ClaimOutcome::HeldBy { agent, expires_at } => return Ok(Err((agent, expires_at))),
+        };
+        // The claim's write may have changed the catalog: read the task
+        // again before changing it.
+        m = self.get(&id)?;
+        let old = t.owner.clone();
+        let own = old.as_deref() == Some(agent.as_str());
+        if back && own {
+            Self::task_history(
+                &mut m,
+                &t.status,
+                task_status::ACTIVE,
+                &agent,
+                now,
+                &[("note", "taken again after its claim lapsed")],
+            );
+        } else if back {
+            let from = old.clone().unwrap_or_default();
+            Self::task_history(
+                &mut m,
+                &t.status,
+                task_status::ACTIVE,
+                &agent,
+                now,
+                &[("reclaimed_from", from.as_str())],
+            );
+        } else {
+            Self::task_history(
+                &mut m,
+                task_status::QUEUED,
+                task_status::ACTIVE,
+                &agent,
+                now,
+                &[],
+            );
+        }
+        m.metadata.insert(
+            MNEMO_META_STATUS.into(),
+            Value::String(task_status::ACTIVE.into()),
+        );
+        m.metadata
+            .insert(MNEMO_META_OWNER.into(), Value::String(agent.clone()));
+        self.put(m)?;
+        let task = Task::from_memory(&self.get(&id)?).expect("a task");
+        Ok(Ok(TaskTaken {
+            task,
+            token,
+            expires_at,
+            reclaimed_from: if back && !own { old } else { None },
+        }))
     }
 
     /// 13a (13.1): change a task's status (along [`TASK_TRANSITIONS`]), or
