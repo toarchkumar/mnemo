@@ -212,20 +212,22 @@ The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
   Every memory, thread, essence item, task and finding from either copy is
   kept. A delete in one copy wins, and so does an edit that the other copy
   didn't touch.
-- **Edits made in both copies are kept and flagged, not lost.** The newer
-  edit becomes the record, and the other stays as a flagged copy in its
-  history. The merge's report lists the first ten, `mnemo about` counts
-  them, and `mnemo inspect` lists them all.
-- **Settle a conflict with one write.** Forget the copy you don't want
-  (`mnemo forget <id>`, new in the CLI, or the MCP `forget` tool), or write
-  the record or key again: its flag goes at once. The guide's "Merge two
-  copies" section has the steps, and how to put the merged file in place
-  as your project brain.
+- **Edits made in both copies are kept and flagged, not lost.** For a
+  key, the newer version is live and the other stays in the key's history,
+  flagged. For a fact with no key, the newer edit is the record and the
+  other comes out beside it as a flagged copy. The merge's report lists the
+  first ten, `mnemo about` counts them, and `mnemo inspect` lists them all.
+- **Settle a conflict.** Write a key again, or change a flagged essence
+  item, task or finding, and its flag goes at once. For a fact's copy,
+  forget the one you don't want (`mnemo forget <id>`, new in the CLI, or
+  the MCP `forget` tool). The guide's "Merge two copies" section has the
+  steps, and how to put the merged file in place as your project brain.
 - **The merge gives the same file in any order.** Merging a with b equals
   b with a, merging the result again changes nothing, and three or four
   copies merge alike in any grouping. Random tests check this, with clocks
-  that run ahead and behind, and with copies that v0.20.2 wrote to. A few
-  narrow cases with v0.20.2's writes are listed in the CHANGELOG.
+  that run ahead and behind, and with writes made the way older builds
+  make them; fixed tests check files the published v0.20.2 wrote. A few
+  narrow cases with older builds' writes are listed in the CHANGELOG.
 - There's no format change: v0.20.2 opens a merged file. The Swift and
   Android libraries stay at 0.20.0.
 
