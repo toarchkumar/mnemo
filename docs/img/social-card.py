@@ -85,11 +85,17 @@ def main():
     img.paste(mark, (PAD, 74), mark)
     d.text((PAD + 92, 84), "MNemo", font=sans(52, bold=True), fill=INK)
 
-    # The headline, then the line under it.
-    head = sans(76, bold=True)
-    d.text((PAD, 206), "Your coding agent forgets.", font=head, fill=INK)
-    d.text((PAD, 298), "Give it a memory.", font=head, fill=ACCENT_INK)
-    d.text((PAD, 412), "One encrypted file in your repo.", font=sans(40), fill=INK_2)
+    # The headline, at the largest size up to 76 px whose longer line fits
+    # inside the margins, then the line under it.
+    lines = ("Every agent you run,", "remembering and coordinating as one.")
+    size = 76
+    while max(d.textlength(t, font=sans(size, bold=True)) for t in lines) > W - 2 * PAD:
+        size -= 1
+    head = sans(size, bold=True)
+    pitch = round(size * 1.2)
+    d.text((PAD, 206), lines[0], font=head, fill=INK)
+    d.text((PAD, 206 + pitch), lines[1], font=head, fill=ACCENT_INK)
+    d.text((PAD, 206 + 2 * pitch + 44), "One encrypted file in your repo.", font=sans(40), fill=INK_2)
 
     # The command, as a code pill, and the address.
     f = mono(28)
