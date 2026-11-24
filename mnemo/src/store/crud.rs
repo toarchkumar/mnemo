@@ -489,7 +489,7 @@ impl Mnemo {
         // and delete of a superseded record frees a `history` entry. When
         // the caches are built, `note_removed` above did that exactly;
         // otherwise they're built from scratch on first use anyway.
-        if was_live && marker {
+        if was_live && marker && !self.hlc_clock.older_build {
             self.put_tombstone(id, old_meta.as_ref())?;
         }
         Ok(())
@@ -516,14 +516,18 @@ impl Mnemo {
                 }
                 // What it was written over, so a merge keeps the key's
                 // written history (decision.v0210-chain-rule).
-                let over = match o.metadata.get(crate::memory::MNEMO_META_MERGE_LINKED) {
+                let linked = o.metadata.get(crate::memory::MNEMO_META_MERGE_LINKED);
+                let after = o.metadata.get(crate::memory::MNEMO_META_SUPERSEDES);
+                let over = match linked {
                     Some(v) => v.clone(),
-                    None => o
-                        .metadata
-                        .get(crate::memory::MNEMO_META_SUPERSEDES)
-                        .cloned()
-                        .unwrap_or(Value::Null),
+                    None => after.cloned().unwrap_or(Value::Null),
                 };
+                // RB-020.4: and, when a merge put it after another version
+                // (which lost to it), that one, so a merge leaves the chain
+                // ended where this delete left it.
+                if let (Some(_), Some(p)) = (linked, after) {
+                    md.insert(crate::memory::MNEMO_META_TOMBSTONE_AFTER.into(), p.clone());
+                }
                 md.insert(crate::memory::MNEMO_META_TOMBSTONE_SUPERSEDES.into(), over);
             }
             // RB-019.2: a turn's thread and turn id (ids, never content).

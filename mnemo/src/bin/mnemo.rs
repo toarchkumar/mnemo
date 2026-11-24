@@ -406,6 +406,9 @@ enum Command {
         #[arg(long, value_name = "PATH", conflicts_with = "b_passphrase")]
         b_key_file: Option<String>,
         /// The second copy's passphrase, when it differs from the first's.
+        /// Without a flag, the second copy's secret is `MNEMO_B_PASSPHRASE`,
+        /// else its own key-store entry, else the first copy's; when that
+        /// doesn't open it, `merge` asks at a terminal.
         #[arg(long)]
         b_passphrase: Option<String>,
         /// `table` (default) or `json`, with the ids of the records each
@@ -2545,6 +2548,18 @@ fn merge_secret(s: &inspect::Secret) -> mnemo_engine::MergeSecret<'_> {
     }
 }
 
+/// RB-020.6: whether `s` opens the file at `path` (read-only), so `merge`
+/// can say which copy a wrong secret was for.
+fn opens(path: &str, s: &inspect::Secret) -> bool {
+    !matches!(
+        match s {
+            inspect::Secret::Passphrase(p) => Mnemo::open_read_only(path, p).map(drop),
+            inspect::Secret::Key(k) => Mnemo::open_read_only_with_key(path, k).map(drop),
+        },
+        Err(mnemo_engine::MnemoError::WrongPassphrase)
+    )
+}
+
 /// v0.21.0 (13.7): the same secret again, for `merge`'s second copy.
 fn same_secret(s: &inspect::Secret) -> inspect::Secret {
     match s {
@@ -2618,6 +2633,8 @@ fn print_merge_report(
             "after_cycles": r.after_cycles,
             "lead_ms": r.lead_ms,
             "hlc_since": r.hlc_since,
+            "older_deletes": r.older_deletes,
+            "settled": ids(&r.settled),
         });
         println!(
             "{}",
@@ -2648,6 +2665,19 @@ fn print_merge_report(
         );
     }
     println!("  removed, deleted in a copy: {}", r.removed.len());
+    if !r.settled.is_empty() {
+        println!(
+            "  conflict copies settled, their record edited since: {}",
+            r.settled.len()
+        );
+    }
+    if r.older_deletes > 0 {
+        println!(
+            "  older deletes kept as tombstones: {} (deleted rows with none, so a later merge \
+             keeps them deleted)",
+            r.older_deletes
+        );
+    }
     if r.dropped > 0 {
         println!("  left out, as compaction leaves them out: {}", r.dropped);
     }
@@ -2685,8 +2715,10 @@ fn print_merge_report(
         })
         .collect();
     println!(
-        "note: a merge doesn't know deletes made by an older build, or before a v0.21 build \
-         first wrote to a copy ({})",
+        "note: deletes an older build made are applied while the copy still holds them as \
+         deleted rows; ones the file has since dropped (a compaction does, and so does a \
+         commit once a quarter of its rows are deleted) aren't known (the first v0.21 \
+         write: {})",
         since.join(", ")
     );
     println!("note: {a} and {b} still hold the records the merge removed");
@@ -3879,21 +3911,53 @@ fn run() -> std::result::Result<(), String> {
             format,
         } => {
             let sa = secret_for(&a, &pp, &key_file)?;
-            let sb = if b_key_file.is_some() || b_passphrase.is_some() {
+            let b_flag = b_key_file.is_some() || b_passphrase.is_some();
+            let sb = if b_flag {
                 secret_for(&b, &b_passphrase, &b_key_file)?
-            } else if key_file.is_some() || pp.is_some() {
-                same_secret(&sa)
+            } else if let Ok(p) = std::env::var("MNEMO_B_PASSPHRASE") {
+                inspect::Secret::Passphrase(zeroize::Zeroizing::new(p))
             } else {
                 second_copy_secret(&b, &sa)?
             };
-            let report = Mnemo::merge_files(
-                &a,
-                merge_secret(&sa),
-                &b,
-                merge_secret(&sb),
-                &out,
-                &mnemo_engine::MergeOptions::default(),
-            )
+            let run = |sb: &inspect::Secret| {
+                Mnemo::merge_files(
+                    &a,
+                    merge_secret(&sa),
+                    &b,
+                    merge_secret(sb),
+                    &out,
+                    &mnemo_engine::MergeOptions::default(),
+                )
+            };
+            let report = match run(&sb) {
+                // RB-020.6: say which copy the secret didn't open, and how
+                // to give the second its own; at a terminal, ask for it.
+                Err(mnemo_engine::MnemoError::WrongPassphrase) if !opens(&b, &sb) => {
+                    let how = "give it its own with --b-passphrase, MNEMO_B_PASSPHRASE or \
+                               --b-key-file";
+                    if b_flag || !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                        return Err(format!(
+                            "the second copy, {b}: wrong passphrase, or the key material has \
+                             been tampered with; {how}"
+                        ));
+                    }
+                    let p = rpassword::prompt_password(format!("Passphrase for {b}: "))
+                        .map_err(|e| format!("failed to read passphrase: {e}"))?;
+                    match run(&inspect::Secret::Passphrase(zeroize::Zeroizing::new(p))) {
+                        Err(mnemo_engine::MnemoError::WrongPassphrase) => {
+                            return Err(format!(
+                                "the second copy, {b}: wrong passphrase, or the key material \
+                                 has been tampered with; {how}"
+                            ))
+                        }
+                        r => r,
+                    }
+                }
+                Err(e @ mnemo_engine::MnemoError::WrongPassphrase) => {
+                    return Err(format!("the first copy, {a}: {}", fmt(e)));
+                }
+                r => r,
+            }
             .map_err(fmt)?;
             print_merge_report(&a, &b, &out, &report, format);
         }

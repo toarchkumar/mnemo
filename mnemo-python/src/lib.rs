@@ -4002,15 +4002,17 @@ fn compact_file_with_key(py: Python<'_>, path: &str, key: &[u8]) -> PyResult<PyO
 /// into a new file at `out`, leaving both as they were. `a` opens with
 /// `passphrase` or `key` (32 bytes), and so does the output; `b` with
 /// `b_passphrase` or `b_key` (a copy rekeyed since), else with `a`'s.
-/// Merge copies, not a brain in use: each input is held for readers for
-/// the whole merge.
+/// Merge copies, not a brain in use: each input is held for readers while
+/// it's read.
 ///
 /// Returns the report as a dict: `merged`, `both`, `a_only` and `b_only`
 /// (ids), `conflicts` (by kind), `conflict_ids`, `removed` (ids),
 /// `dropped`, `kept_keys`, `renamed`, `after_cycles`, `lead_ms` and
-/// `hlc_since` (one per input). Raises `InvalidArgumentError` with the
-/// reason when the merge is refused (not one brain, different embedders,
-/// a copy older than format 9, an output that exists).
+/// `hlc_since` (one per input), `older_deletes` (older deletes kept as
+/// tombstones) and `settled` (conflict copies settled since, ids). Raises
+/// `InvalidArgumentError` with the reason when the merge is refused (not
+/// one brain, different embedders, a copy older than format 9, an output
+/// that exists).
 #[pyfunction]
 #[pyo3(signature = (a, b, out, *, passphrase=None, key=None, b_passphrase=None, b_key=None))]
 #[allow(clippy::too_many_arguments)]
@@ -4098,6 +4100,8 @@ fn merge_files(
     d.set_item("after_cycles", report.after_cycles.clone())?;
     d.set_item("lead_ms", report.lead_ms.to_vec())?;
     d.set_item("hlc_since", report.hlc_since.to_vec())?;
+    d.set_item("older_deletes", report.older_deletes)?;
+    d.set_item("settled", ids(&report.settled))?;
     Ok(d.into_any().unbind())
 }
 

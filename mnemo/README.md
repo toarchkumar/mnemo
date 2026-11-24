@@ -677,22 +677,31 @@ and KDF settings, with a new data key, like a compaction.
 
 - A delete in either copy wins, by id, with no clock: the record is gone
   from the output, unless that copy wrote the id again afterwards. A delete
-  made by an older build (a deleted row and no tombstone) counts too; one
-  made before the copy was last compacted by an older build doesn't.
+  made by an older build (a deleted row and no tombstone) counts too, and
+  the output keeps it as a tombstone, so it stays deleted in later merges;
+  one the copy has since dropped (a compaction does, and so does a commit
+  once a quarter of its rows are deleted) doesn't.
 - A record edited in one copy only takes that edit. Edited in both, the
   newer edit wins, and a fact keeps the other text as a conflict copy
   (`_mnemo.merge_conflict`, `_mnemo.merge_source`). Each in-place rewrite
   lists the versions before it (`_mnemo.hlc_prev`, the 8 latest), which is
   how a merge tells one from the other. Past 8 versions a merge can't
-  tell, and keeps a conflict copy rather than lose one.
+  tell, and keeps a conflict copy rather than lose one. A record an older
+  build wrote has no such list: this build's first edit of it lists the
+  version it found, so an edit in one copy still wins with no copy.
 - A record a merge combines lists the concurrent versions it holds
   (`_mnemo.merge_heads`). An essence item, task or finding is flagged while
   two of them hold different text, and a conflict copy stays while its
-  text is one of them: edit the record (from the merged file) and the
-  next merge drops the flag or the copy. So copies merge to the same
-  records in any order, a copy of a copy too.
+  text is one of them: edit the record (from the merged file) and its
+  flag goes at once, or for a fact, its copy goes at the next merge, which
+  counts it as settled. Forgetting the record instead keeps the copy beside its
+  tombstone. So copies merge to the same records in any order, a copy of a
+  copy too.
 - A key written in both copies becomes one chain, both versions in
-  history, ordered by when each was first written (`_mnemo.first_hlc`).
+  history: each version after the one it was written over, and versions
+  with no written path between them by when each was first written
+  (`_mnemo.first_hlc`; an older build's version by when it was created,
+  to the millisecond of its id).
   When the versions nothing written follows hold different text, each but
   the last is flagged. The
   chain comes from what was written, never from links an earlier merge
@@ -700,9 +709,11 @@ and KDF settings, with a new data key, like a compaction.
   the link its write made, a link the merge makes is marked
   (`_mnemo.merge_linked`, with the version it was written over), and a
   deleted version's tombstone keeps what it was written over
-  (`_mnemo.tombstone_supersedes`). Forgetting a key's live version ends
+  (`_mnemo.tombstone_supersedes`), and the version a merge had put it
+  after (`_mnemo.tombstone_after`). Forgetting a key's live version ends
   its chain, and a merge keeps it ended unless a version written after it
-  is kept. Essence items, tasks
+  is kept; a version that lost to the one forgotten keeps its flag. A keyed manifest's
+  slot is one chain too. Essence items, tasks
   and findings merge their status (`done`, `verified` and `resolved` are
   final); two tasks or findings under one name keep both, the later
   renamed `<name>-merge-2` and flagged until it can take its name back.
@@ -711,8 +722,9 @@ and KDF settings, with a new data key, like a compaction.
   the forget, stays.
 
 `MergeReport` says what came from each side, what conflicted, what was
-deleted, and how far each copy's clock ran ahead. The inputs are held for
-readers for the whole merge, so merge copies, not a brain in use.
+deleted (and the older deletes it kept as tombstones), the conflict copies
+settled, and how far each copy's clock ran ahead. Each input is held for
+readers while it's read, so merge copies, not a brain in use.
 `Mnemo::merge_conflicts` returns the records a merge flagged; `mnemo
 merge a b -o out` runs it from a shell, and `about` and `inspect` show the
 flagged records.
@@ -1075,7 +1087,7 @@ cargo run --bin mnemo -- <command>
 | `verify`  | Decrypt and re-validate every live record; since v0.19.1 it also reads the ANN index and reports it on its own line (a damaged index is a warning: the memories are intact, and `mnemo index --rebuild` repairs it) |
 | `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
 | `compact` | Rebuild the file, dropping deleted rows and expired records (since v0.21.0 it keeps the tombstone record each delete leaves, so a delete no longer makes the file smaller); writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again. Since v0.15 it also rebuilds the keyword index with tokenizer 2 |
-| `merge <A> <B> -o <OUT>` | v0.21.0: merge two diverged copies of one brain into a new file, leaving both as they were (`Mnemo::merge_files`; the rules are under "Merging two copies"). The output opens with the first copy's secret (`--passphrase`, `--key-file`, or the key store); the second copy takes its own with `--b-passphrase` or `--b-key-file`, else the key store's entry for its salt, else the first copy's. Prints what came from each copy, the conflicts by kind, the removals, keys deleted in one copy and written in the other, renamed tasks and findings, and `after` cycles; `--format json` adds the ids. A copy's clock more than an hour ahead is a warning on stderr. Refused, with the reason and exit 1, when the copies aren't one brain, their embedders differ, a copy is older than format 9, or the output exists. Merge copies, not the brain in use: each input is held for readers for the whole merge |
+| `merge <A> <B> -o <OUT>` | v0.21.0: merge two diverged copies of one brain into a new file, leaving both as they were (`Mnemo::merge_files`; the rules are under "Merging two copies"). The output opens with the first copy's secret (`--passphrase`, `--key-file`, or the key store); the second copy takes its own with `--b-passphrase`, `--b-key-file` or `MNEMO_B_PASSPHRASE`, else the key store's entry for its salt, else the first copy's; when that doesn't open it, `merge` asks at a terminal, and the error names the copy. Prints what came from each copy, the conflicts by kind, the removals, keys deleted in one copy and written in the other, renamed tasks and findings, and `after` cycles; `--format json` adds the ids. A copy's clock more than an hour ahead is a warning on stderr. Refused, with the reason and exit 1, when the copies aren't one brain, their embedders differ, a copy is older than format 9, or the output exists. Merge copies, not the brain in use: each input is held for readers while it's read |
 | `reembed` | Embed every live memory again with a new embedder (`--embed-cmd`, `--embed-name`, `--embed-query`, `--embed-dims`; without `--embed-cmd`, the built-in) and record its identity: a compaction with new vectors, so an interrupted run leaves the file as it was (v0.15) |
 | `embedder install` | Fetch the built-in embedder's model (91.0 MB) into the cache directory, checking each file's SHA-256; prints the size first (v0.15) |
 | `embedder status` | The built-in embedder's model, identity and cache, and whether it's installed (v0.15) |

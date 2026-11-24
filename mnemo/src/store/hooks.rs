@@ -75,6 +75,26 @@ impl Mnemo {
         Ok(Header::from_page(&page)?.wrapped_dek.to_vec())
     }
 
+    /// **Not a stable API.** v0.21.0 (RB-020.6): the data key of the file
+    /// at `path`, unwrapped with `passphrase`, so a test can see that a
+    /// merge's output draws a key of its own (the wrapped bytes differ
+    /// anyway: each wrap takes a fresh nonce).
+    #[doc(hidden)]
+    pub fn __data_key_for_testing(path: impl AsRef<Path>, passphrase: &str) -> Result<Vec<u8>> {
+        let mut file = File::open(path.as_ref())?;
+        let mut page = [0u8; PAGE_SIZE];
+        file.read_exact(&mut page)?;
+        let h = Header::from_page(&page)?;
+        let kdf = KdfParams {
+            m_cost: h.m_cost,
+            t_cost: h.t_cost,
+            p_cost: h.p_cost,
+        };
+        let kek = crate::crypto::derive_kek(passphrase.as_bytes(), &h.salt, kdf)?;
+        let dek = crate::crypto::unwrap_dek(&kek, &h.dek_nonce, &h.wrapped_dek)?;
+        Ok(dek.to_vec())
+    }
+
     /// **Not a stable API.** v0.21.0 (RB-019.8): move this handle's clock
     /// for stamps by `ms` (negative: behind), so a test can run one copy
     /// ahead of another. `MNEMO_DEV_HLC_OFFSET_MS` adds to it.
@@ -90,6 +110,15 @@ impl Mnemo {
     #[doc(hidden)]
     pub fn __freeze_hlc_clock_for_testing(&mut self, at_ms: Option<u64>) {
         self.hlc_clock.frozen_ms = at_ms;
+    }
+
+    /// **Not a stable API.** v0.21.0 (RB-020.4): this handle writes as a
+    /// build before v0.21 did: no clock stamp, version or first stamp on a
+    /// write (an in-place edit keeps what it found), and no tombstone for a
+    /// delete, so a test can make the records an upgraded brain holds.
+    #[doc(hidden)]
+    pub fn __write_as_older_build_for_testing(&mut self, on: bool) {
+        self.hlc_clock.older_build = on;
     }
 
     /// **Not a stable API.** PERF-2 (v0.19.0): load the ANN index and write

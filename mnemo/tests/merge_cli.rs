@@ -200,6 +200,61 @@ fn the_second_copy_takes_its_own_secret() {
     );
     assert_eq!(o.status.code(), Some(1), "{}", text(&o.stdout));
     assert!(!out.exists());
+    // RB-020.6: the error names the second copy and how to give its own.
+    let e = text(&o.stderr);
+    assert!(
+        e.contains(&format!("the second copy, {}", s(&b))) && e.contains("--b-passphrase"),
+        "{e}"
+    );
+    assert!(e.contains("MNEMO_B_PASSPHRASE"), "{e}");
+    // A wrong flag for it says the same.
+    let o = mnemo(
+        &[
+            "merge",
+            s(&a),
+            s(&b),
+            "-o",
+            s(&out),
+            "--passphrase",
+            PW,
+            "--b-passphrase",
+            "not b's",
+        ],
+        &[],
+    );
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        text(&o.stderr).contains("the second copy"),
+        "{}",
+        text(&o.stderr)
+    );
+    // MNEMO_B_PASSPHRASE opens it, with no flag in shell history.
+    let o = mnemo(
+        &["merge", s(&a), s(&b), "-o", s(&out), "--passphrase", PW],
+        &[("MNEMO_B_PASSPHRASE", "b's own passphrase")],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    Mnemo::open_read_only(&out, PW).unwrap();
+    std::fs::remove_file(&out).unwrap();
+    // A wrong secret for the first copy names it.
+    let o = mnemo(
+        &[
+            "merge",
+            s(&a),
+            s(&b),
+            "-o",
+            s(&out),
+            "--passphrase",
+            "not a's",
+        ],
+        &[("MNEMO_B_PASSPHRASE", "b's own passphrase")],
+    );
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        text(&o.stderr).contains(&format!("the first copy, {}", s(&a))),
+        "{}",
+        text(&o.stderr)
+    );
     // Its own flag does; the output opens with the first copy's.
     let o = mnemo(
         &[

@@ -29,7 +29,8 @@ use crate::memory::{
     MNEMO_META_MERGE_CONFLICT, MNEMO_META_MERGE_HEADS, MNEMO_META_MERGE_LINKED,
     MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_MERGE_STATUS_CONFLICT,
     MNEMO_META_OWNER, MNEMO_META_READY_SEEN_BY, MNEMO_META_SEEN_BY, MNEMO_META_SLUG,
-    MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_TOMBSTONE_SUPERSEDES,
+    MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_TOMBSTONE_AFTER,
+    MNEMO_META_TOMBSTONE_SUPERSEDES,
 };
 
 /// One input of the rules: its live records (with vectors and access
@@ -224,6 +225,35 @@ fn same_record(a: &Memory, b: &Memory) -> bool {
             .all(|((kx, x), (ky, y))| kx == ky && same_json(x, y))
 }
 
+/// RB-020.4: one version of a key, held by two inputs that differ only in
+/// what the key's chain sets again from what was written. An older build
+/// writes a key's next version by marking the one before in place, with no
+/// stamp (`_mnemo.superseded_by`, `_mnemo.invalid_at`), so two copies look
+/// like concurrent edits; and a version an older build wrote has no stamp
+/// or version, so a merge's relinking of it (its link, its mark, its flag)
+/// can't be told from an edit either. What was written is the same: its
+/// text and fields, and what it was written over.
+fn only_marks_differ(a: &Memory, b: &Memory) -> bool {
+    if !matches!(kind(a), Kind::Fact | Kind::Manifest)
+        || !a.metadata.contains_key(MNEMO_META_KEY)
+        || !b.metadata.contains_key(MNEMO_META_KEY)
+    {
+        return false;
+    }
+    if stamp(a).is_none() && stamp(b).is_none() {
+        return same_record(&written_core(a), &written_core(b));
+    }
+    let strip = |m: &Memory| {
+        let mut c = m.clone();
+        c.metadata.remove(MNEMO_META_SUPERSEDED_BY);
+        c.metadata.remove(MNEMO_META_INVALID_AT);
+        c.accessed_at = 0;
+        c.access_count = 0;
+        c
+    };
+    same_record(&strip(a), &strip(b))
+}
+
 /// What a merge may change after it places a record (its key's links and
 /// flags, a task's or a finding's name), so the later passes keep each
 /// input's own version of it to compare with.
@@ -369,17 +399,53 @@ fn group(m: &Memory) -> u64 {
     u64::from_be_bytes(h[..8].try_into().expect("8 bytes")) >> 2
 }
 
-/// A version as one head: an older build's record (no stamp, or no
-/// version hash) by its number and the hash of what it holds.
-fn own_head(m: &Memory) -> Head {
+/// A version as `(stamp, version)`: an older build's record (no stamp, or
+/// no version hash) by its number and the hash of what it holds. `put`
+/// lists this pair among an older record's earlier versions when this
+/// build first rewrites it (RB-020.5), so a merge sees the edit descend
+/// from the untouched copy.
+pub(super) fn own_pair(m: &Memory) -> (u64, u64) {
     (
         stamp(m).unwrap_or_else(|| number(m)),
         m.metadata
             .get(MNEMO_META_VER)
             .and_then(Value::as_u64)
-            .unwrap_or_else(|| super::records::version_hash(m)),
-        group(m),
+            .unwrap_or_else(|| super::records::version_hash(&written_core(m))),
     )
+}
+
+/// RB-020.4: what an unstamped version of a key holds as written: the
+/// record with the link its write made, less what the key's chain sets
+/// again (its mark, its flag, its heads, a merge's link) and its access
+/// stats. Two copies of it agree on this however they were relinked.
+fn written_core(m: &Memory) -> Memory {
+    let mut c = m.clone();
+    if matches!(kind(m), Kind::Fact | Kind::Manifest) && m.metadata.contains_key(MNEMO_META_KEY) {
+        let over = written_over(m);
+        for k in [
+            MNEMO_META_SUPERSEDED_BY,
+            MNEMO_META_INVALID_AT,
+            MNEMO_META_MERGE_LINKED,
+            MNEMO_META_MERGE_CONFLICT,
+            MNEMO_META_MERGE_HEADS,
+        ] {
+            c.metadata.remove(k);
+        }
+        set_or_remove(
+            &mut c,
+            MNEMO_META_SUPERSEDES,
+            over.map(|u| Value::String(Ulid(u).to_string())),
+        );
+    }
+    c.accessed_at = 0;
+    c.access_count = 0;
+    c
+}
+
+/// A version as one head: [`own_pair`] and its group.
+fn own_head(m: &Memory) -> Head {
+    let (s, v) = own_pair(m);
+    (s, v, group(m))
 }
 
 /// The versions a record combines: the list a merge left on it; for a fact
@@ -540,9 +606,12 @@ fn build_copy(source: u128, cand: &Memory, list: &BTreeSet<Head>, src: Option<&M
     c
 }
 
-/// A conflict copy as a merge made it (its id still names its text).
+/// A conflict copy as a merge made it: its id still names its text, and
+/// it still holds the versions it was made from, which any write removes
+/// (one that kept the text, changing only its vector, say, is an edit).
 fn pristine_copy(m: &Memory) -> bool {
     kind(m) == Kind::Fact
+        && m.metadata.contains_key(MNEMO_META_MERGE_HEADS)
         && ulid_at(m, MNEMO_META_MERGE_SOURCE)
             .is_some_and(|s| m.id.0 == copy_id(s, &content_hash(m)))
 }
@@ -598,8 +667,21 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
         let mut body = d.clone();
         body.accessed_at = a.accessed_at.max(b.accessed_at);
         body.access_count = a.access_count.max(b.access_count);
+        // Less a version the other input was edited from: one version can
+        // be written twice alike (the same text in one millisecond), once
+        // from it and once not, and the winner's list keeps it only when
+        // the other input's ancestry isn't read (RB-020.4).
+        let hd = heads(d);
+        let hs = joined_heads(a, &ha, b, &hb);
+        if hs != hd && !hs.is_empty() {
+            set_or_remove(
+                &mut body,
+                MNEMO_META_MERGE_HEADS,
+                (hs.len() >= 2).then(|| heads_value(&hs)),
+            );
+        }
         if flag_follows_heads(d) {
-            set_flag(&mut body, &heads(d));
+            set_flag(&mut body, &hs);
         }
         name_version(a, b, &mut body);
         merged_prev(a, b, &mut body);
@@ -826,17 +908,6 @@ struct Side {
     held: BTreeMap<u128, Memory>,
     /// Each record's `_mnemo.superseded_by` mark: (the record, the target).
     marks: Vec<(u128, u128)>,
-    /// What each record with a link was written over ([`written_over`]).
-    over: HashMap<u128, Option<u128>>,
-}
-
-impl Side {
-    /// [`written_over`] of this input's record `t`, if it holds `t`.
-    fn written_over(&self, t: u128) -> Option<Option<u128>> {
-        self.ids
-            .contains(&t)
-            .then(|| self.over.get(&t).copied().flatten())
-    }
 }
 
 fn turn_of(m: &Memory) -> Option<(String, String)> {
@@ -891,6 +962,9 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     // Turns an input holds beside a tombstone of their turn: saved again
     // after the forget, which named only what it saw.
     let mut saved_again: HashSet<u128> = HashSet::new();
+    // RB-020.3: the same for conflict copies: a copy an input holds beside
+    // its source's tombstone was kept by the user who forgot the source.
+    let mut kept_copies: HashSet<u128> = HashSet::new();
     // Ids each input ever held: live, deleted, or named by its tombstones.
     let mut known: [HashSet<u128>; 2] = [HashSet::new(), HashSet::new()];
     // The key slots of the records each input's tombstones name.
@@ -910,6 +984,12 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 removed.insert(d.0);
             }
         }
+        let mut live_copies: HashMap<u128, Vec<u128>> = HashMap::new();
+        for m in kept[i].iter().filter(|m| pristine_copy(m)) {
+            if let Some(s) = ulid_at(m, MNEMO_META_MERGE_SOURCE) {
+                live_copies.entry(s).or_default().push(m.id.0);
+            }
+        }
         for t in kept[i].iter().filter(|m| kind(m) == Kind::Tombstone) {
             let Some(x) = ulid_at(t, MNEMO_META_TOMBSTONE_OF) else {
                 continue;
@@ -919,6 +999,9 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 continue; // written again after the delete: void
             }
             removed.insert(x);
+            if let Some(ids) = live_copies.get(&x) {
+                kept_copies.extend(ids.iter().copied());
+            }
             if let Some(key) = meta_str(t, MNEMO_META_TOMBSTONE_KEY) {
                 let owner = meta_str(t, MNEMO_META_TOMBSTONE_OWNER).map(str::to_string);
                 deleted_keys[i].push((owner, key.to_string()));
@@ -940,7 +1023,8 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     }
     let gone = |m: &Memory| {
         removed.contains(&m.id.0)
-            || ulid_at(m, MNEMO_META_MERGE_SOURCE).is_some_and(|s| removed.contains(&s))
+            || (!kept_copies.contains(&m.id.0)
+                && ulid_at(m, MNEMO_META_MERGE_SOURCE).is_some_and(|s| removed.contains(&s)))
             || (kind(m) == Kind::Turn
                 && !saved_again.contains(&m.id.0)
                 && turn_of(m).is_some_and(|t| removed_turns.contains(&t)))
@@ -1003,22 +1087,15 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     let mut sides: Vec<Side> = Vec::new();
     for records in &by_id {
         let mut marks = Vec::new();
-        let mut over = HashMap::new();
         for (&id, m) in records {
             if let Some(t) = ulid_at(m, MNEMO_META_SUPERSEDED_BY) {
                 marks.push((id, t));
-            }
-            if m.metadata.contains_key(MNEMO_META_MERGE_LINKED)
-                || m.metadata.contains_key(MNEMO_META_SUPERSEDES)
-            {
-                over.insert(id, written_over(m));
             }
         }
         sides.push(Side {
             ids: records.keys().copied().collect(),
             held: BTreeMap::new(),
             marks,
-            over,
         });
     }
 
@@ -1066,6 +1143,15 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                     body.accessed_at = accessed_at;
                     body.access_count = access_count;
                     out.insert(id, body);
+                    continue;
+                }
+                if only_marks_differ(&x, &y) {
+                    let mut body = if wins(&x, &y) { x.clone() } else { y.clone() };
+                    body.accessed_at = x.accessed_at.max(y.accessed_at);
+                    body.access_count = x.access_count.max(y.access_count);
+                    out.insert(id, body);
+                    sides[0].held.insert(id, x);
+                    sides[1].held.insert(id, y);
                     continue;
                 }
                 let r = resolve(&x, &y);
@@ -1120,6 +1206,12 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     // edited from has none. The inputs' copies and this merge's new ones
     // are only where the text comes from.
     let mut cands: BTreeMap<u128, BTreeMap<u64, Vec<Memory>>> = BTreeMap::new();
+    // The inputs' own copies, by source, for the report's settled ones.
+    let input_copies: BTreeSet<(u128, u128)> = copies
+        .iter()
+        .filter(|c| pristine_copy(c))
+        .filter_map(|c| Some((ulid_at(c, MNEMO_META_MERGE_SOURCE)?, c.id.0)))
+        .collect();
     for c in copies {
         if let Some(s) = ulid_at(&c, MNEMO_META_MERGE_SOURCE) {
             cands
@@ -1150,10 +1242,22 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         }
     }
 
+    // RB-020.3 (2): an input's copy whose record is here but no longer
+    // holds its text (the record was edited since the merge that made it,
+    // decision.v0210-conflict-flags (3)).
+    report.settled = input_copies
+        .into_iter()
+        .filter(|(s, c)| out.contains_key(s) && !out.contains_key(c))
+        .map(|(_, c)| c)
+        .collect::<BTreeSet<u128>>()
+        .into_iter()
+        .map(Ulid)
+        .collect();
     relink_slots(&mut out, &sides, &mut conflicts, &mut conflict_ids);
     report.renamed = rename_names(&mut out, &sides, &mut conflict_ids);
     report.after_cycles = after_cycles(&out);
     keep_one_turn_copy(&mut out, &sides);
+    report.older_deletes = mark_older_deletes(&mut out, &deleted);
     keep_one_tombstone(&mut out);
     name_final_versions(&mut out, &sides);
 
@@ -1181,11 +1285,55 @@ fn written_over(m: &Memory) -> Option<u128> {
     }
 }
 
+/// RB-020.1: `members` in an order where each version comes after the one
+/// it was written over (`before_of`), and versions with no written path
+/// between them go by `key_of`: the smallest key among those whose earlier
+/// version is placed goes next. A cycle (which no write makes) is broken
+/// at its smallest key.
+fn written_order<K: Ord>(
+    members: &[u128],
+    before_of: impl Fn(u128) -> Option<u128>,
+    key_of: impl Fn(u128) -> K,
+) -> Vec<u128> {
+    let mut waiting: BTreeMap<u128, Vec<u128>> = BTreeMap::new();
+    let mut ready: BTreeSet<(K, u128)> = BTreeSet::new();
+    let mut left: BTreeSet<u128> = members.iter().copied().collect();
+    for &n in members {
+        match before_of(n) {
+            Some(p) => waiting.entry(p).or_default().push(n),
+            None => {
+                ready.insert((key_of(n), n));
+            }
+        }
+    }
+    let mut order = Vec::with_capacity(members.len());
+    while !left.is_empty() {
+        let n = match ready.pop_first() {
+            Some((_, n)) => n,
+            None => *left
+                .iter()
+                .min_by_key(|&&n| key_of(n))
+                .expect("a version left"),
+        };
+        if !left.remove(&n) {
+            continue;
+        }
+        order.push(n);
+        for c in waiting.remove(&n).unwrap_or_default() {
+            if left.contains(&c) {
+                ready.insert((key_of(c), c));
+            }
+        }
+    }
+    order
+}
+
 /// A key slot's versions as one chain, from what was written, never from
 /// links a merge made (decision.v0210-chain-rule, as Git recomputes from
 /// its commits): so the chain is the same whichever copies were merged
 /// first. The versions go by the number each was first written with (a
-/// write's stamp is past the one it supersedes), then created_at, then id.
+/// write's stamp is past the one it supersedes; an older build's version,
+/// never stamped, by its id's millisecond), then created_at, then id.
 /// Each keeps the link its write made, to the version before it or to a
 /// deleted one between them; where the version before ended in a forgotten
 /// version and nothing written follows it, the chain stays broken there, as
@@ -1200,7 +1348,11 @@ fn relink_slots(
 ) {
     let mut slots: BTreeMap<(Option<String>, String), Vec<u128>> = BTreeMap::new();
     for (id, m) in out.iter() {
-        if kind(m) != Kind::Fact || m.metadata.contains_key(MNEMO_META_MERGE_SOURCE) {
+        // A keyed manifest's slot too (RB-020.6): two copies rewriting it
+        // leave one chain, not two live manifests.
+        if !matches!(kind(m), Kind::Fact | Kind::Manifest)
+            || m.metadata.contains_key(MNEMO_META_MERGE_SOURCE)
+        {
             continue;
         }
         if let Some(k) = meta_str(m, MNEMO_META_KEY) {
@@ -1209,8 +1361,8 @@ fn relink_slots(
         }
     }
     // What each deleted version was written over: its tombstone's record of
-    // it; for an older tombstone, an input's copy of the version; else the
-    // version an input links to it from.
+    // it, else the version an input links to it from (no input holds a
+    // deleted version past the delete rule, so its own link is gone).
     let mut gone_over: BTreeMap<u128, Option<u128>> = BTreeMap::new();
     for m in out.values() {
         if kind(m) != Kind::Tombstone {
@@ -1240,23 +1392,38 @@ fn relink_slots(
         }
     }
     for (&t, &p) in &linked_from {
-        if let std::collections::btree_map::Entry::Vacant(e) = gone_over.entry(t) {
-            e.insert(
-                sides
-                    .iter()
-                    .find_map(|s| s.written_over(t))
-                    .unwrap_or(Some(p)),
-            );
+        gone_over.entry(t).or_insert(Some(p));
+    }
+    // The deleted versions written over each version (REV-017.2 (3)), and
+    // those a merge had put after it, which it lost to (RB-020.4), in id
+    // order.
+    let mut merged_after: BTreeMap<u128, u128> = BTreeMap::new();
+    for m in out.values() {
+        if kind(m) != Kind::Tombstone {
+            continue;
+        }
+        if let (Some(t), Some(p)) = (
+            ulid_at(m, MNEMO_META_TOMBSTONE_OF),
+            ulid_at(m, MNEMO_META_TOMBSTONE_AFTER),
+        ) {
+            if !out.contains_key(&t) {
+                merged_after.insert(t, p);
+            }
         }
     }
-    // The deleted versions written over each version (REV-017.2 (3)), in
-    // id order.
     let mut gone_children: BTreeMap<u128, Vec<u128>> = BTreeMap::new();
     for (&t, o) in &gone_over {
         if let Some(p) = *o {
             if !out.contains_key(&t) {
                 gone_children.entry(p).or_default().push(t);
             }
+        }
+    }
+    for (&t, &p) in &merged_after {
+        let c = gone_children.entry(p).or_default();
+        if !c.contains(&t) {
+            c.push(t);
+            c.sort_unstable();
         }
     }
     for members in slots.into_values() {
@@ -1312,24 +1479,34 @@ fn relink_slots(
                     after.into_iter().min()
                 }
             };
-            // A version is placed by the number it was first written with,
-            // which a later write superseding it doesn't change.
+            // Between versions with no written path from one to the other,
+            // a version is placed by the number it was first written with,
+            // which a later write superseding it doesn't change; a record
+            // an older build wrote, never stamped at its creation, by when
+            // it was created, to the millisecond: its id's time (RB-020.1,
+            // decision.v0210-5f-older-builds).
             let key_of = |n: u128| -> (u64, i64, u128) {
                 let m = &out[&n];
                 let first = m
                     .metadata
                     .get(MNEMO_META_FIRST_HLC)
                     .and_then(Value::as_u64)
-                    .unwrap_or_else(|| {
-                        super::records::hlc_prev(m)
-                            .into_iter()
-                            .map(|p| p.0)
-                            .fold(number(m), u64::min)
-                    });
+                    .unwrap_or((n >> 80) as u64);
                 (first, m.created_at, n)
             };
-            let mut order = members.clone();
-            order.sort_by_key(|&n| key_of(n));
+            // The slot's version each was written over, through deleted
+            // ones.
+            let before_of = |n: u128| -> Option<u128> {
+                let mut x = over_of(n)?;
+                for _ in 0..=gone_over.len() {
+                    if member_set.contains(&x) {
+                        return (x != n).then_some(x);
+                    }
+                    x = over_of(x)?;
+                }
+                None
+            };
+            let order = written_order(&members, before_of, key_of);
             // Each version's two links.
             let mut before: BTreeMap<u128, Option<u128>> = BTreeMap::new();
             let mut after: BTreeMap<u128, Option<u128>> = BTreeMap::new();
@@ -1378,11 +1555,20 @@ fn relink_slots(
                 .collect();
             // The versions nothing written follows (no version, kept or
             // deleted, was written over them).
+            let written_after = |n: u128| {
+                !gone_after(n).is_empty() || members.iter().any(|&m| over_of(m) == Some(n))
+            };
+            // Less one holding the text of a version a write followed: the
+            // same change made in two copies is no conflict, and stays none
+            // once a write follows one of them (RB-020.4).
             let heads = order
                 .iter()
                 .copied()
                 .filter(|&n| {
-                    gone_after(n).is_empty() && !members.iter().any(|&m| over_of(m) == Some(n))
+                    !written_after(n)
+                        && !order.iter().any(|&p| {
+                            p != n && written_after(p) && same_visible(&out[&n], &out[&p])
+                        })
                 })
                 .collect();
             (order, links, heads)
@@ -1432,10 +1618,32 @@ fn relink_slots(
         } else {
             BTreeSet::new()
         };
+        // RB-020.4: a version whose chain ends at the version it lost to in
+        // a merge, forgotten since (its tombstone says so), keeps the flag
+        // an input gave it: what it was compared with is gone, so nothing
+        // can recompute it, and only a new write of the key settles it.
+        let kept_flags: BTreeSet<u128> = order
+            .iter()
+            .copied()
+            .filter(|n| {
+                links[n]
+                    .2
+                    .is_some_and(|x| !out.contains_key(&x) && merged_after.get(&x) == Some(n))
+                    && (out[n].metadata.contains_key(MNEMO_META_MERGE_CONFLICT)
+                        || sides.iter().any(|s| {
+                            s.held
+                                .get(n)
+                                .is_some_and(|v| v.metadata.contains_key(MNEMO_META_MERGE_CONFLICT))
+                        }))
+            })
+            .collect();
         let mut new_flags = Vec::new();
         for &n in &order {
             let m = out.get_mut(&n).expect("a member");
-            if flagged.contains(&n) {
+            if kept_flags.contains(&n) && !flagged.contains(&n) {
+                m.metadata
+                    .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
+            } else if flagged.contains(&n) {
                 m.metadata
                     .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
                 let had = sides.iter().any(|s| {
@@ -1681,13 +1889,46 @@ fn name_final_versions(out: &mut BTreeMap<u128, Memory>, sides: &[Side]) {
         // A record no input holds a copy of is one the merge placed and
         // never changed (REV-017.2 (2)): its version stands. So does one
         // that's still the first input's copy.
+        // An older build marks a key's version superseded in place and
+        // leaves its hash, so such a copy names the version it was before
+        // the mark, not the one it holds, and matches the merged record
+        // only by chance (when the merge linked it the same way): it's
+        // never the merged record's name, which then comes from what the
+        // record holds, so the output doesn't depend on the order copies
+        // are merged in (RB-020.4). Merging such a copy even with itself
+        // names it once, as it gives an older build's deleted rows
+        // tombstones.
+        let unmarked = |x: &Memory| {
+            let mut c = x.clone();
+            c.metadata.remove(MNEMO_META_SUPERSEDED_BY);
+            c.metadata.remove(MNEMO_META_INVALID_AT);
+            c
+        };
+        let names_itself = |x: &Memory| {
+            let older_mark = matches!(kind(x), Kind::Fact | Kind::Manifest)
+                && x.metadata.contains_key(MNEMO_META_KEY)
+                && x.metadata
+                    .get(MNEMO_META_VER)
+                    .and_then(Value::as_u64)
+                    .is_some_and(|v| {
+                        let v = v & !VER_MERGED;
+                        v != version_hash(x) && v == version_hash(&unmarked(x))
+                    });
+            !older_mark
+        };
         let inputs: Vec<&Memory> = sides.iter().filter_map(|s| s.held.get(id)).collect();
-        if inputs.first().is_none_or(|x| same_record(m, x)) {
+        if inputs
+            .first()
+            .is_none_or(|x| same_record(m, x) && names_itself(x))
+        {
             continue;
         }
         let core = core_bytes(m);
         let mut prev = hlc_prev(m);
-        let v = match inputs.iter().find(|x| core_bytes(x) == core) {
+        let v = match inputs
+            .iter()
+            .find(|x| core_bytes(x) == core && names_itself(x))
+        {
             Some(x) => match x.metadata.get(MNEMO_META_VER).and_then(Value::as_u64) {
                 Some(v) => v,
                 None => continue, // an older build's version, as it was
@@ -1826,6 +2067,68 @@ pub(crate) mod link_hook {
     }
 }
 
+/// RB-020.2: a tombstone for each id an input deleted with none (a deleted
+/// row: an older build's delete), so the output keeps the delete and a
+/// later merge with a copy that still holds the record removes it again.
+/// It's the same in every run and grouping: its id from the deleted id (as
+/// a conflict copy's from its source), only `_mnemo.tombstone_of`, no
+/// stamp and no time (created when the deleted record was, by its id), so
+/// a tombstone a delete wrote always wins over it. Returns how many the
+/// output gained.
+fn mark_older_deletes(out: &mut BTreeMap<u128, Memory>, deleted: &[Vec<Ulid>; 2]) -> usize {
+    let named: HashSet<u128> = out
+        .values()
+        .filter(|m| kind(m) == Kind::Tombstone)
+        .filter_map(|m| ulid_at(m, MNEMO_META_TOMBSTONE_OF))
+        .collect();
+    let Some(dims) = out.values().map(|m| m.vector.len()).find(|&n| n > 0) else {
+        return 0;
+    };
+    let mut added = 0;
+    for d in deleted.iter().flatten() {
+        let id = older_delete_id(d.0);
+        if named.contains(&d.0) || out.contains_key(&d.0) || out.contains_key(&id) {
+            continue;
+        }
+        let secs = ((d.0 >> 80) as u64 / 1000) as i64;
+        let mut m = Memory::new(
+            String::new(),
+            MemoryType::Working,
+            vec![1.0 / (dims as f32).sqrt(); dims],
+        )
+        .with_scope(Scope::Shared);
+        m.id = Ulid(id);
+        m.created_at = secs;
+        m.accessed_at = secs;
+        m.access_count = 0;
+        m.metadata = Map::new();
+        m.metadata.insert(
+            MNEMO_META_KIND.into(),
+            Value::String(MNEMO_META_KIND_TOMBSTONE.into()),
+        );
+        m.metadata.insert(
+            MNEMO_META_TOMBSTONE_OF.into(),
+            Value::String(Ulid(d.0).to_string()),
+        );
+        out.insert(id, m);
+        added += 1;
+    }
+    added
+}
+
+/// The id of [`mark_older_deletes`]' tombstone for `target`: its time part
+/// and 80 bits of a hash of it.
+fn older_delete_id(target: u128) -> u128 {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"mnemo merge older delete");
+    h.update(target.to_be_bytes());
+    let d = h.finalize();
+    let mut low = [0u8; 16];
+    low[6..].copy_from_slice(&d[..10]);
+    (target & !((1u128 << 80) - 1)) | u128::from_be_bytes(low)
+}
+
 /// One tombstone per deleted id: the larger number, then the larger id.
 fn keep_one_tombstone(out: &mut BTreeMap<u128, Memory>) {
     let mut by_target: BTreeMap<u128, Vec<u128>> = BTreeMap::new();
@@ -1889,8 +2192,8 @@ impl Mnemo {
 
     /// v0.21.0 (13.7): **merge two diverged copies of one brain into a new
     /// file at `out`**. Neither input changes: each is opened read-only,
-    /// with its own secret, and held for readers for the whole merge (so a
-    /// live brain's writers wait; merge copies).
+    /// with its own secret, and held for readers while it's read (so a live
+    /// brain's writers wait; merge copies).
     ///
     /// The inputs are one brain when their salts match (a copy of a copy),
     /// or when both manifests have the same id (a copy rekeyed since). The
@@ -1901,7 +2204,9 @@ impl Mnemo {
     /// put in place with a hard link, which fails if `out` exists; on a
     /// filesystem without hard links (exFAT, FAT32, some FUSE mounts), it's
     /// copied into a file created only if `out` doesn't exist. On any error
-    /// nothing is left behind.
+    /// nothing is left behind, but for one case: a crash or power loss
+    /// during that copy can leave a partial file at `out`, which the next
+    /// merge refuses as existing (remove it by hand).
     ///
     /// Refused, with the reason, when the inputs aren't one brain; when
     /// their embedder identities, dimensions or float-vector settings
@@ -1909,9 +2214,11 @@ impl Mnemo {
     /// open first; and when `out` exists (a link included) or is an input.
     ///
     /// The rules are in the module's documentation; [`MergeReport`] says
-    /// what they did. A delete made before an input's `_mnemo.hlc_since`,
-    /// or by an older build, isn't known to a merge, and the inputs still
-    /// hold the records the merge removed.
+    /// what they did. A delete an older build made is applied while the
+    /// copy still holds it as a deleted row, and the output keeps it as a
+    /// tombstone; one the file has since dropped (a compaction does, and so
+    /// does a commit once a quarter of its rows are deleted) isn't known. The
+    /// inputs still hold the records the merge removed.
     pub fn merge_files(
         a: impl AsRef<Path>,
         a_secret: MergeSecret<'_>,
@@ -1935,7 +2242,11 @@ impl Mnemo {
             return Err(refuse(if is_input {
                 format!("the output {} is one of the inputs", out.display())
             } else {
-                format!("the output {} already exists", out.display())
+                format!(
+                    "the output {} already exists (if an interrupted merge left it, remove it \
+                     and merge again)",
+                    out.display()
+                )
             }));
         }
         let open = |p: &Path, s: MergeSecret<'_>, label: &str| -> Result<Mnemo> {

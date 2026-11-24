@@ -11,7 +11,12 @@
 //!   (decision.v0210-ancestry), never a silent loss.
 //! - A tombstone that v0.20.2's compaction wrote back as a fact is still a
 //!   tombstone to the merge (it reads the record's kind, not its row).
-//! - Records with no stamp (v0.20.2's own) fall back to the conflict rule.
+//! - A record with no stamp (v0.20.2's own) that this build edits names
+//!   what it was edited from, so the edit wins over the copy that didn't
+//!   change it (RB-020.5); edits by v0.20.2 in both still conflict.
+//! - A key v0.20.2 wrote keeps this build's later version live through any
+//!   merge (RB-020.1), and a delete v0.20.2 made stays deleted when the
+//!   output is merged again (RB-020.2).
 
 use std::path::{Path, PathBuf};
 
@@ -148,10 +153,108 @@ fn an_older_builds_delete_with_no_tombstone_is_a_delete() {
     assert_eq!(r.hlc_since, [None, None]);
 }
 
+/// Every record of the file at `p` as JSON, by id (vectors left out: the
+/// fp16 column reads them back alike).
+fn records(p: &Path) -> Vec<serde_json::Value> {
+    let mut db = Mnemo::open_read_only(p, PW).unwrap();
+    let mut recs = db.memories().unwrap();
+    recs.sort_by_key(|m| m.id);
+    recs.iter()
+        .map(|m| {
+            let mut j = serde_json::to_value(m).unwrap();
+            j.as_object_mut().unwrap().remove("vector");
+            j
+        })
+        .collect()
+}
+
+fn live_text(p: &Path, key: &str) -> Vec<String> {
+    let mut db = Mnemo::open_read_only(p, PW).unwrap();
+    db.history(key, None)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.content)
+        .collect()
+}
+
 #[test]
-fn records_with_no_stamp_edited_on_one_side_fall_back_to_a_copy() {
-    // v0.20.2 wrote `fact a` with no stamp: the merge can't tell that this
-    // build's edit descends from it, so it keeps both (conservative).
+fn a_key_an_older_build_wrote_keeps_this_builds_version_live_through_a_merge() {
+    // RB-020.1: v0.20.2 wrote `k` once and `k2` twice; this build writes
+    // each again, which rewrites the old version in place as superseded.
+    let (dir, p) = copies(&["keyed.mnemo"]);
+    let o = |n: &str| dir.path().join(n);
+    std::fs::copy(&p[0], o("untouched.mnemo")).unwrap();
+    let mut db = Mnemo::open(&p[0], PW).unwrap();
+    for (key, text, x) in [
+        ("k", "k as v0.21 wrote it", 5.0),
+        ("k2", "k2 third, by v0.21", 6.0),
+    ] {
+        db.remember_keyed(Memory::new(text, MemoryType::Semantic, v(x)), key)
+            .unwrap();
+    }
+    db.close().unwrap();
+    let before = (live_text(&p[0], "k"), live_text(&p[0], "k2"));
+    assert_eq!(before.0, ["k as v0.21 wrote it", "k as v0.20.2 wrote it"]);
+    assert_eq!(
+        before.1,
+        [
+            "k2 third, by v0.21",
+            "k2 second, by v0.20.2",
+            "k2 first, by v0.20.2"
+        ]
+    );
+    std::fs::copy(&p[0], o("x2.mnemo")).unwrap();
+    // The copy with itself, and with the copy this build never wrote, in
+    // both orders.
+    for (a, b, out) in [
+        (p[0].clone(), o("x2.mnemo"), "xx.mnemo"),
+        (p[0].clone(), o("untouched.mnemo"), "xu.mnemo"),
+        (o("untouched.mnemo"), p[0].clone(), "ux.mnemo"),
+    ] {
+        let r = merge(&a, &b, &o(out));
+        assert!(r.conflicts.is_empty(), "{out}: {r:?}");
+        assert_eq!(
+            (live_text(&o(out), "k"), live_text(&o(out), "k2")),
+            before,
+            "{out}"
+        );
+    }
+    assert_eq!(records(&o("xx.mnemo")), records(&p[0]), "merge(x, x) = x");
+    assert_eq!(records(&o("xu.mnemo")), records(&o("ux.mnemo")));
+    merge(&o("xu.mnemo"), &o("untouched.mnemo"), &o("xu_u.mnemo"));
+    merge(&o("xu.mnemo"), &p[0], &o("xu_x.mnemo"));
+    assert_eq!(records(&o("xu_u.mnemo")), records(&o("xu.mnemo")));
+    assert_eq!(records(&o("xu_x.mnemo")), records(&o("xu.mnemo")));
+}
+
+#[test]
+fn an_older_builds_delete_stays_deleted_when_the_output_is_merged_again() {
+    // RB-020.2: the output keeps the delete as a tombstone.
+    let (dir, p) = copies(&["plain_base.mnemo", "plain_deleted.mnemo"]);
+    let o = |n: &str| dir.path().join(n);
+    let r = merge(&p[1], &p[0], &o("out1.mnemo"));
+    assert_eq!(r.older_deletes, 1);
+    for (a, b, out) in [
+        (o("out1.mnemo"), p[0].clone(), "again_base.mnemo"),
+        (p[0].clone(), o("out1.mnemo"), "base_again.mnemo"),
+        (o("out1.mnemo"), p[1].clone(), "again_deleted.mnemo"),
+        (o("out1.mnemo"), o("out1.mnemo"), "again_out.mnemo"),
+    ] {
+        let r = merge(&a, &b, &o(out));
+        assert_eq!(contents(&o(out)), ["fact a", "fact c"], "{out}");
+        assert_eq!(r.older_deletes, 0, "{out}: the tombstone is already there");
+        assert_eq!(records(&o(out)), records(&o("out1.mnemo")), "{out}");
+    }
+    // Either order gives the same tombstone.
+    merge(&p[0], &p[1], &o("out2.mnemo"));
+    assert_eq!(records(&o("out2.mnemo")), records(&o("out1.mnemo")));
+}
+
+#[test]
+fn a_one_sided_first_edit_of_an_older_record_wins_with_no_copy() {
+    // RB-020.5: v0.20.2 wrote `fact a` with no stamp; this build's edit
+    // lists that version among the ones before it, so it descends from the
+    // copy that wasn't edited.
     let (dir, p) = copies(&["plain_base.mnemo", "plain_deleted.mnemo"]);
     let mut db = Mnemo::open(&p[0], PW).unwrap();
     let id = db
@@ -170,19 +273,25 @@ fn records_with_no_stamp_edited_on_one_side_fall_back_to_a_copy() {
         },
     )
     .unwrap();
+    let e = db.get(&id).unwrap();
+    assert_eq!(
+        e.metadata.get("_mnemo.first_hlc").and_then(|x| x.as_u64()),
+        Some(e.id.timestamp_ms()),
+        "its first stamp is when v0.20.2 created it (RB-020.1)"
+    );
     db.close().unwrap();
     let out = dir.path().join("out.mnemo");
     let r = merge(&p[0], &p[1], &out);
-    assert_eq!(r.conflicts.get("fact"), Some(&1));
+    assert!(r.conflicts.is_empty(), "{r:?}");
     let mut db = Mnemo::open_read_only(&out, PW).unwrap();
     assert_eq!(db.get(&id).unwrap().content, "fact a, edited by v0.21");
-    let copy = db
-        .memories()
-        .unwrap()
-        .into_iter()
-        .find(|m| m.metadata.get(MNEMO_META_MERGE_SOURCE).is_some())
-        .unwrap();
-    assert_eq!(copy.content, "fact a");
+    assert!(
+        !db.memories()
+            .unwrap()
+            .iter()
+            .any(|m| m.metadata.get(MNEMO_META_MERGE_SOURCE).is_some()),
+        "no conflict copy"
+    );
 }
 
 #[test]

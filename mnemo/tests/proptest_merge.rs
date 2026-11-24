@@ -23,8 +23,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use mnemo_engine::{
-    EssenceScope, EssenceSection, KdfParams, Memory, MemoryPatch, MemoryType, MergeReport, Mnemo,
-    MnemoConfig, TaskSpec, ThreadTurn, Ulid,
+    EssenceScope, EssenceSection, KdfParams, Memory, MemoryPatch, MemoryType, MergeOptions,
+    MergeReport, MergeSecret, Mnemo, MnemoConfig, TaskSpec, ThreadTurn, Ulid,
 };
 use proptest::prelude::*;
 use serde_json::Value;
@@ -52,6 +52,11 @@ enum Op {
     AckAll,
     Turn(u8),
     ThreadForget,
+    // RB-020.4: what a build before v0.21 writes: a fact and a key's
+    // version with no stamps, and a delete with no tombstone.
+    OlderRemember(u8),
+    OlderKeyed(u8, u8),
+    OlderForget(u8),
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -72,6 +77,9 @@ fn op() -> impl Strategy<Value = Op> {
         Just(Op::AckAll),
         (0u8..4).prop_map(Op::Turn),
         Just(Op::ThreadForget),
+        any::<u8>().prop_map(Op::OlderRemember),
+        (0u8..3, any::<u8>()).prop_map(|(k, v)| Op::OlderKeyed(k, v)),
+        any::<u8>().prop_map(Op::OlderForget),
     ]
 }
 
@@ -294,6 +302,39 @@ fn diverge(p: &Path, ops: &[Op], t: u64, offset: i64, who: &str) -> (Vec<Memory>
                 )
                 .map(|_| ()),
             Op::ThreadForget => db.thread_forget("t").map(|_| ()),
+            Op::OlderRemember(_) | Op::OlderKeyed(..) | Op::OlderForget(_) => {
+                db.__write_as_older_build_for_testing(true);
+                let r = match o {
+                    Op::OlderRemember(x) => db
+                        .remember(Memory::new(
+                            format!("{who}, as an older build, wrote {x}"),
+                            MemoryType::Semantic,
+                            vector(500 + n),
+                        ))
+                        .map(|_| ()),
+                    Op::OlderKeyed(k, x) => db
+                        .remember_keyed(
+                            Memory::new(
+                                format!("key {k} is {x}, by an older build"),
+                                MemoryType::Semantic,
+                                vector(600 + n),
+                            ),
+                            &format!("k{k}"),
+                        )
+                        .map(|_| ()),
+                    Op::OlderForget(target) => {
+                        let f = facts(&mut db);
+                        if f.is_empty() {
+                            Ok(())
+                        } else {
+                            db.delete(&f[*target as usize % f.len()])
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                db.__write_as_older_build_for_testing(false);
+                r
+            }
         };
     }
     db.close().unwrap();
@@ -319,6 +360,24 @@ fn norm(recs: &[Memory]) -> Vec<Value> {
     let mut v: Vec<&Memory> = recs.iter().filter(|m| !local(m)).collect();
     v.sort_by_key(|m| m.id);
     v.iter().map(|m| serde_json::to_value(m).unwrap()).collect()
+}
+
+/// Records without the names of key versions (`_mnemo.ver`,
+/// `_mnemo.hlc_prev`), for the laws a version an older build marked in
+/// place keeps but for its name.
+fn unnamed(recs: &[Value]) -> Vec<Value> {
+    recs.iter()
+        .map(|r| {
+            let mut r = r.clone();
+            if let Some(md) = r.get_mut("metadata").and_then(Value::as_object_mut) {
+                if md.contains_key("_mnemo.key") {
+                    md.remove("_mnemo.ver");
+                    md.remove("_mnemo.hlc_prev");
+                }
+            }
+            r
+        })
+        .collect()
 }
 
 fn mirrored(r: &MergeReport) -> MergeReport {
@@ -442,7 +501,33 @@ fn as_input(recs: Vec<Memory>) -> Input {
 
 /// merge(a,b) = merge(b,a) with the report mirrored, the idempotence laws,
 /// and coverage, on two copies.
+/// An older build writes a key this build wrote in the same file while
+/// that file's clock ran ahead: this build's stamps are then ahead of the
+/// older build's write, which has none, so no rule can see that it came
+/// after (decision.v0210-5f-older-builds). The laws skip such a history, as
+/// the copy-of-a-copy law skips older deletes.
+fn older_key_write_after_an_ahead_one(history: &[(&[Op], i64)]) -> bool {
+    let mut ahead = BTreeSet::new();
+    for (ops, clock) in history {
+        for o in *ops {
+            match o {
+                Op::Keyed(k, _) if *clock > 0 => {
+                    ahead.insert(*k);
+                }
+                Op::OlderKeyed(k, _) if ahead.contains(k) => return true,
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
 fn two_copies(ops_a: &[Op], ops_b: &[Op], ca: i64, cb: i64) -> Result<(), TestCaseError> {
+    if older_key_write_after_an_ahead_one(&[(ops_a, ca)])
+        || older_key_write_after_an_ahead_one(&[(ops_b, cb)])
+    {
+        return Ok(());
+    }
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("base.mnemo");
     base(&p);
@@ -464,23 +549,21 @@ fn two_copies(ops_a: &[Op], ops_b: &[Op], ca: i64, cb: i64) -> Result<(), TestCa
     prop_assert_eq!(mirrored(&r_ab), r_ba, "the report, mirrored");
 
     let out = as_input(ab.clone());
-    prop_assert_eq!(
-        norm(&merge(&out, &b, now).0),
-        norm(&ab),
-        "merge(merge(a,b),b)"
-    );
-    prop_assert_eq!(
-        norm(&merge(&out, &a, now).0),
-        norm(&ab),
-        "merge(merge(a,b),a)"
-    );
+    for (name, x) in [("merge(merge(a,b),b)", &b), ("merge(merge(a,b),a)", &a)] {
+        let again = norm(&merge(&out, x, now).0);
+        prop_assert!(again == norm(&ab), "{}:{}", name, diff(&norm(&ab), &again));
+    }
+    // merge(x,x) = x, but for the names of key versions an older build
+    // marked superseded in place (RB-020.4): the first merge names them,
+    // and after that merging again changes nothing.
     for x in [&a, &b] {
         let lone = (x.0.clone(), Vec::new());
-        prop_assert_eq!(
-            norm(&merge(&lone, &lone, now).0),
-            norm(&x.0),
-            "merge(x,x) = x"
-        );
+        let xx = merge(&lone, &lone, now).0;
+        let (l, r) = (unnamed(&norm(&x.0)), unnamed(&norm(&xx)));
+        prop_assert!(l == r, "merge(x,x) = x:{}", diff(&l, &r));
+        let again = (xx.clone(), Vec::new());
+        let (l, r) = (norm(&xx), norm(&merge(&again, &again, now).0));
+        prop_assert!(l == r, "merge(xx,xx) = xx:{}", diff(&l, &r));
     }
 
     let removed: BTreeSet<Ulid> = r_ab.removed.iter().copied().collect();
@@ -504,6 +587,9 @@ fn two_copies(ops_a: &[Op], ops_b: &[Op], ca: i64, cb: i64) -> Result<(), TestCa
 
 /// merge(merge(a,b),c) = merge(a,merge(b,c)) on three copies.
 fn three_copies(ops: [&[Op]; 3], clocks: [i64; 3]) -> Result<(), TestCaseError> {
+    if (0..3).any(|i| older_key_write_after_an_ahead_one(&[(ops[i], clocks[i])])) {
+        return Ok(());
+    }
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("base.mnemo");
     base(&p);
@@ -538,6 +624,12 @@ fn three_copies(ops: [&[Op]; 3], clocks: [i64; 3]) -> Result<(), TestCaseError> 
 /// its ops (a copy of a copy, whose edits descend from the first's), merged
 /// in four groupings.
 fn a_copy_of_a_copy(ops: [&[Op]; 4], clocks: [i64; 4]) -> Result<(), TestCaseError> {
+    // d is a copy of a after a's writes.
+    if (0..3).any(|i| older_key_write_after_an_ahead_one(&[(ops[i], clocks[i])]))
+        || older_key_write_after_an_ahead_one(&[(ops[0], clocks[0]), (ops[3], clocks[3])])
+    {
+        return Ok(());
+    }
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("base.mnemo");
     base(&p);
@@ -572,16 +664,126 @@ fn a_copy_of_a_copy(ops: [&[Op]; 4], clocks: [i64; 4]) -> Result<(), TestCaseErr
             diff(&first, &norm(&g.0))
         );
     }
-    // d descends from a: merging a with it changes nothing.
-    let dd = norm(&d.0);
-    for (name, g) in [("a+d", m(&a, &d)), ("d+a", m(&d, &a))] {
-        prop_assert!(norm(&g.0) == dd, "{} = d:{}", name, diff(&dd, &norm(&g.0)));
+    // d descends from a: merging a with it changes nothing, but for the
+    // tombstones a merge writes for d's deleted rows (RB-020.2), as it
+    // does merging d with itself. Not when a or d deleted as an older
+    // build does: a deleted row goes from the file once a quarter of the
+    // rows are deleted, and nothing can know that delete then.
+    if !ops[0]
+        .iter()
+        .chain(ops[3])
+        .any(|o| matches!(o, Op::OlderForget(_)))
+    {
+        let dd = norm(&merge(&d, &d, now).0);
+        for (name, g) in [("a+d", m(&a, &d)), ("d+a", m(&d, &a))] {
+            prop_assert!(norm(&g.0) == dd, "{} = d:{}", name, diff(&dd, &norm(&g.0)));
+        }
     }
     prop_assert!(
         nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1 .0).is_ok(),
         "{:?}",
         nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1 .0)
     );
+    Ok(())
+}
+
+/// Records as JSON without their vectors (a file's fp16 column reads them
+/// back rounded).
+fn norm_no_vectors(recs: &[Memory]) -> Vec<Value> {
+    norm(recs)
+        .into_iter()
+        .map(|mut j| {
+            j.as_object_mut().unwrap().remove("vector");
+            j
+        })
+        .collect()
+}
+
+/// RB-020.4: two copies merged through `merge_files` (the file a user
+/// gets, reopened), then written on (edits and forgets of the records that
+/// won and of their conflict copies among them) before the next merge. The
+/// file holds what the rules gave; merging it with itself or with either
+/// input gives it back, as a merge writes it (its deleted rows as
+/// tombstones).
+fn writes_on_an_output(ops: [&[Op]; 3], clocks: [i64; 2]) -> Result<(), TestCaseError> {
+    if (0..2).any(|i| older_key_write_after_an_ahead_one(&[(ops[i], clocks[i])])) {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("base.mnemo");
+    base(&p);
+    let (pa, pb, px) = (
+        dir.path().join("a.mnemo"),
+        dir.path().join("b.mnemo"),
+        dir.path().join("x.mnemo"),
+    );
+    std::fs::copy(&p, &pa).unwrap();
+    std::fs::copy(&p, &pb).unwrap();
+    let t = wall_ms();
+    let a = diverge(&pa, ops[0], t, clocks[0], "worker-a");
+    let b = diverge(&pb, ops[1], t, clocks[1], "worker-b");
+    let now = wall_ms();
+    Mnemo::merge_files(
+        &pa,
+        MergeSecret::Passphrase(PW),
+        &pb,
+        MergeSecret::Passphrase(PW),
+        &px,
+        &MergeOptions::at(now),
+    )
+    .unwrap();
+    let read = Mnemo::open_read_only(&px, PW)
+        .unwrap()
+        .__merge_input_for_testing()
+        .unwrap();
+    let rules = merge(&a, &b, now).0;
+    prop_assert!(
+        norm_no_vectors(&read.0) == norm_no_vectors(&rules),
+        "the file holds what the rules gave:{}",
+        diff(&norm_no_vectors(&rules), &norm_no_vectors(&read.0))
+    );
+    // This build writes on the output. (An older build's delete leaves a
+    // deleted row, which a commit drops once a quarter of the rows are
+    // deleted; a later merge can't know it then.)
+    let ops_x: Vec<Op> = ops[2]
+        .iter()
+        .filter(|o| {
+            !matches!(
+                o,
+                Op::OlderRemember(_) | Op::OlderKeyed(..) | Op::OlderForget(_)
+            )
+        })
+        .cloned()
+        .collect();
+    let x = diverge(&px, &ops_x, wall_ms(), 0, "worker-x");
+    let now = wall_ms() + 1;
+    let xx = norm(&merge(&x, &x, now).0);
+    // merge(x,x) = x, but for the conflict copies a write on x settled
+    // (its record edited to the copy's text, RB-020.3): they go, and the
+    // report lists them.
+    let lone = (x.0.clone(), Vec::new());
+    let (again, r_again) = merge(&lone, &lone, now);
+    let again = norm(&again);
+    let settled: BTreeSet<Ulid> = r_again.settled.iter().copied().collect();
+    let kept: Vec<Memory> =
+        x.0.iter()
+            .filter(|m| !settled.contains(&m.id))
+            .cloned()
+            .collect();
+    prop_assert!(
+        again == norm(&kept),
+        "merge(x,x) = x:{}",
+        diff(&norm(&kept), &again)
+    );
+    for (name, (l, r)) in [
+        ("merge(x,a)", (&x, &a)),
+        ("merge(a,x)", (&a, &x)),
+        ("merge(x,b)", (&x, &b)),
+        ("merge(b,x)", (&b, &x)),
+    ] {
+        let got = norm(&merge(l, r, now).0);
+        prop_assert!(got == xx, "{} = x:{}", name, diff(&xx, &got));
+    }
     Ok(())
 }
 
@@ -623,6 +825,17 @@ proptest! {
     ) {
         a_copy_of_a_copy([&ops_a, &ops_b, &ops_c, &ops_d], [ca, cb, cc, cd])?;
     }
+
+    #[test]
+    fn prop_writes_on_an_output(
+        ops_a in prop::collection::vec(op(), 0..6),
+        ops_b in prop::collection::vec(op(), 0..6),
+        ops_x in prop::collection::vec(op(), 1..6),
+        ca in clock(),
+        cb in clock(),
+    ) {
+        writes_on_an_output([&ops_a, &ops_b, &ops_x], [ca, cb])?;
+    }
 }
 
 // The cases proptest saved in `proptest_merge.proptest-regressions`, as
@@ -636,7 +849,7 @@ type Saved<const N: usize> = (&'static str, [Vec<Op>; N], [i64; N]);
 #[test]
 fn saved_cases_of_two_copies() {
     use Op::*;
-    let cases: [Saved<2>; 5] = [
+    let cases: [Saved<2>; 6] = [
         (
             "2217d7",
             [vec![TaskTake, TaskReady], vec![TaskTake]],
@@ -661,6 +874,11 @@ fn saved_cases_of_two_copies() {
             [0, 0],
         ),
         ("fd93c0", [vec![Keyed(0, 0)], vec![Keyed(0, 0)]], [0, 0]),
+        (
+            "ccd5d7",
+            [vec![Keyed(0, 0), ForgetKeyed(0), OlderKeyed(0, 21)], vec![]],
+            [0, 0],
+        ),
     ];
     for (seed, [a, b], [ca, cb]) in cases {
         two_copies(&a, &b, ca, cb).unwrap_or_else(|e| panic!("{seed}: {e}"));
@@ -740,7 +958,32 @@ fn saved_cases_of_three_copies() {
 #[test]
 fn saved_cases_of_a_copy_of_a_copy() {
     use Op::*;
-    let cases: [Saved<4>; 12] = [
+    let cases: [Saved<4>; 18] = [
+        (
+            "112dca",
+            [
+                vec![Keyed(0, 0)],
+                vec![],
+                vec![OlderKeyed(0, 0)],
+                vec![OlderKeyed(0, 0)],
+            ],
+            [-HOUR, 0, 0, 0],
+        ),
+        (
+            "bbed7a",
+            [
+                vec![OlderKeyed(0, 0)],
+                vec![OlderKeyed(0, 0)],
+                vec![],
+                vec![ForgetKeyed(0)],
+            ],
+            [0, 0, 0, 0],
+        ),
+        (
+            "0cdacf",
+            [vec![], vec![], vec![], vec![OlderKeyed(0, 0)]],
+            [0, 0, 0, 0],
+        ),
         (
             "da61a6",
             [
@@ -864,8 +1107,84 @@ fn saved_cases_of_a_copy_of_a_copy() {
             [vec![], vec![Edit(4, 1)], vec![], vec![Edit(184, 0)]],
             [0, 0, 0, 0],
         ),
+        (
+            "fe20b6",
+            [
+                vec![OlderKeyed(0, 0)],
+                vec![],
+                vec![],
+                vec![OlderKeyed(0, 1)],
+            ],
+            [0, 0, 0, 0],
+        ),
+        (
+            "71685b",
+            [vec![OlderForget(0)], vec![], vec![], vec![OlderForget(0)]],
+            [0, 0, 0, 0],
+        ),
+        (
+            "df9fb1",
+            [
+                vec![OlderForget(0), Forget(0)],
+                vec![],
+                vec![],
+                vec![Forget(0)],
+            ],
+            [0, 0, 0, 0],
+        ),
     ];
     for (seed, [a, b, c, d], clocks) in cases {
         a_copy_of_a_copy([&a, &b, &c, &d], clocks).unwrap_or_else(|e| panic!("{seed}: {e}"));
+    }
+}
+
+#[test]
+fn saved_cases_of_writes_on_an_output() {
+    use Op::*;
+    let cases: [Saved<3>; 5] = [
+        (
+            "39e50c",
+            [
+                vec![Edit(234, 3), Turn(2), TaskAdd(1)],
+                vec![TaskTake, Turn(2), Keyed(0, 239), Edit(27, 1), AckAll],
+                vec![Edit(100, 3)],
+            ],
+            [HOUR, HOUR, 0],
+        ),
+        (
+            "8fed47",
+            [vec![], vec![], vec![OlderForget(0), OlderForget(0)]],
+            [0, 0, 0],
+        ),
+        (
+            "df536c",
+            [
+                vec![Keyed(1, 0)],
+                vec![OlderKeyed(1, 0)],
+                vec![ForgetKeyed(1)],
+            ],
+            [0, 0, 0],
+        ),
+        (
+            "d38297",
+            [
+                vec![EssenceEdit(0)],
+                vec![EssenceEdit(1)],
+                vec![EssenceEdit(1)],
+            ],
+            [HOUR, 0, 0],
+        ),
+        (
+            "f324e3",
+            [
+                vec![OlderKeyed(0, 0)],
+                vec![OlderKeyed(0, 0)],
+                vec![Keyed(0, 0)],
+            ],
+            [0, 0, 0],
+        ),
+    ];
+    for (seed, [a, b, x], [ca, cb, _]) in cases {
+        writes_on_an_output([&a, &b, &x], [ca, cb]).unwrap_or_else(|e| panic!("{seed}: {e}"));
     }
 }

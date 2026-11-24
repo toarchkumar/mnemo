@@ -1136,6 +1136,14 @@ pub struct MergeReport {
     /// Each input's `_mnemo.hlc_since`: deletes made before it, or by an
     /// older build, aren't known to a merge.
     pub hlc_since: [Option<u64>; 2],
+    /// Tombstones the output gained for deletes an input holds only as a
+    /// deleted row (an older build's, made since that copy's last
+    /// compaction), so a later merge keeps them deleted (RB-020.2).
+    pub older_deletes: usize,
+    /// Conflict copies an input held that the output doesn't: their record
+    /// was edited since the merge that made them, which settles them
+    /// (RB-020.3).
+    pub settled: Vec<Ulid>,
 }
 
 /// v0.21.0 (13.7): an input's lead past which the merge's report warns.
@@ -1446,6 +1454,9 @@ pub(super) struct HlcClock {
     /// A wall clock held at this many unix ms (tests only), so two copies
     /// can stamp the same millisecond.
     pub(super) frozen_ms: Option<u64>,
+    /// Write as a build before v0.21 did (tests only, RB-020.4): no stamp
+    /// on a write, no tombstone for a delete.
+    pub(super) older_build: bool,
     /// The first stamp this handle wrote, for the manifest's
     /// `_mnemo.hlc_since` (RB-019.1).
     pub(super) first: Option<u64>,

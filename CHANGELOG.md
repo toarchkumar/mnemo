@@ -66,8 +66,10 @@ aren't published in this release: they stay at 0.20.0.
   adds the ids), says on stderr when a copy's clock ran more than an hour
   ahead, and exits 1 with the reason when the merge is refused. The output
   opens with the first copy's secret; the second copy takes its own
-  (`--b-passphrase`, `--b-key-file`), else the key store's entry for its
-  salt, else the first copy's. `about` says how many records a merge
+  (`--b-passphrase`, `--b-key-file`, `MNEMO_B_PASSPHRASE`), else the key
+  store's entry for its salt, else the first copy's; when that doesn't
+  open it, `merge` asks at a terminal, and the error names the copy
+  (RB-020.6). `about` says how many records a merge
   flagged (`merge_conflicts` in its JSON), and `mnemo inspect` tags them
   `merge conflict`, filters them on the memories tab and counts them on
   the about tab, through `Mnemo::merge_conflicts` and `is_merge_conflict`.
@@ -89,13 +91,17 @@ aren't published in this release: they stay at 0.20.0.
   is recognised field by field rather than hashed (REV-017.2, v0210-3b);
   `examples/merge_bench.rs` builds two diverged copies to time it. The rules are a pure function of the two inputs and
   a fixed `now`: deletes first, by id, with no clock (a tombstone, or an
-  older build's deleted row); one number per record (the larger of
+  older build's deleted row, which the output keeps as a tombstone so it
+  stays deleted in later merges, RB-020.2); one number per record (the larger of
   `_mnemo.hlc` and `_mnemo.updated_at`); a version that descends from the
   other wins (decision.v0210-ancestry); concurrent edits of a fact keep
   the newer and a conflict copy of each other text; a key slot becomes one
   chain computed from what was written, never from links a merge made
-  (decision.v0210-chain-rule): the versions by the stamp each was first
-  written with, each keeping the link its write made (to the version
+  (decision.v0210-chain-rule): each version after the one it was written
+  over, and versions with no written path between them by the stamp each
+  was first written with (an older build's by when it was created, to
+  the millisecond of its id, RB-020.1; a keyed manifest's slot too), each keeping the link its write
+  made (to the version
   before it, or to a deleted one between them); a chain that ended at a
   forgotten version stays ended unless a version written after it is
   kept; elsewhere the merge links the two and marks the later with what
@@ -119,7 +125,32 @@ aren't published in this release: they stay at 0.20.0.
   flags and copies follow them (decision.v0210-conflict-flags): an essence
   item, task or finding is flagged while two of them hold different text,
   and a conflict copy goes once the record is edited from the version it
-  holds, so a copy of a copy merges like any other. `merge(a,b)` and
+  holds (the report counts it as settled), so a copy of a copy merges like
+  any other; a copy kept beside a tombstone of its record stays (RB-020.3),
+  and a copy written since the merge that made it, even with its text
+  unchanged, is kept as written rather than made again.
+  A new write of a flagged essence item, task or finding settles its flag
+  at once, unless a merge's rename of it stands (REV-019.1). A key's
+  version forgotten after a merge put it after another keeps that place on
+  its tombstone (`_mnemo.tombstone_after`), so the chain stays ended there
+  and the version that lost to it keeps its flag; two copies of a key's
+  version an older build wrote are one version when they differ only in
+  what the chain sets again, and a copy of a version an older build
+  marked superseded in place, keeping its hash, never names the merged
+  version: the merge names it from what it holds, so the output doesn't
+  depend on the order copies are merged in, and merging such a copy even
+  with itself names it once, as it gives deleted rows tombstones
+  (RB-020.4). Two things a merge can't know from an older build's writes:
+  a delete the copy no longer holds as a deleted row, and, after this
+  build wrote a key in a copy whose clock ran ahead, that an older build's
+  later write of the key came after (decision.v0210-5f-older-builds).
+  A new record's `created_at` and its id's time now come from one clock
+  read, so they name the same second (a merge reads a deleted version's
+  creation from its id; across a second boundary the two could differ).
+  This build's first edit of a record an older build wrote lists that
+  version among the ones before it, and gives it a first stamp from when
+  it was created, so an edit in one copy wins with no conflict copy
+  (RB-020.5). `merge(a,b)` and
   `merge(b,a)` give the same records, merging an output again with an
   input changes nothing, and three copies, or four with one copied from
   another, merge to the same records in any grouping (property tests, with
@@ -128,7 +159,8 @@ aren't published in this release: they stay at 0.20.0.
   never loses a version. `MergeReport` gives what
   came from each side, conflicts by kind, removals, keys deleted on one
   side and written on the other, renamed tasks and findings, `after`
-  cycles, and each input's clock lead. Refused, with the reason: not one
+  cycles, each input's clock lead, the older deletes kept as tombstones
+  and the conflict copies settled. Refused, with the reason: not one
   brain, different embedders, dimensions or float-vector settings, an
   input older than format 9 or needing a read-write open, an output that
   exists or is an input. Fixtures written by the published v0.20.2 are in

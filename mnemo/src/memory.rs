@@ -101,9 +101,13 @@ impl Memory {
     /// Create a new memory with sensible defaults. The ID and timestamps are
     /// assigned now; tune the rest with the `with_*` builders.
     pub fn new(content: impl Into<String>, memory_type: MemoryType, vector: Vec<f32>) -> Self {
-        let now = now_secs();
+        // One clock read for both: the id's time and `created_at` name the
+        // same second (a merge reads a deleted version's creation from its
+        // id).
+        let id = Ulid::new();
+        let now = (id.timestamp_ms() / 1000) as i64;
         Memory {
-            id: Ulid::new(),
+            id,
             memory_type,
             vector,
             content: content.into(),
@@ -226,9 +230,10 @@ impl Memory {
         if dimensions > 0 {
             vector[0] = 1.0;
         }
-        let now = now_secs();
+        let id = Ulid::new();
+        let now = (id.timestamp_ms() / 1000) as i64;
         Memory {
-            id: Ulid::new(),
+            id,
             memory_type: MemoryType::Semantic,
             vector,
             content,
@@ -364,6 +369,11 @@ pub const MNEMO_META_TOMBSTONE_OWNER: &str = "_mnemo.tombstone_owner";
 /// written over (an id, or JSON null), on its tombstone, so a merge keeps
 /// the key's written history once the version is gone.
 pub const MNEMO_META_TOMBSTONE_SUPERSEDES: &str = "_mnemo.tombstone_supersedes";
+/// v0.21.0 (RB-020.4): the version a deleted key's version came after in
+/// the file it was deleted from, when a merge put it there (it lost to that
+/// one), on its tombstone. A merge keeps that version's chain ended, and its
+/// conflict flag, where the delete left them.
+pub const MNEMO_META_TOMBSTONE_AFTER: &str = "_mnemo.tombstone_after";
 /// v0.21.0: when a tombstone's record was deleted, in unix seconds.
 pub const MNEMO_META_DELETED_AT: &str = "_mnemo.deleted_at";
 /// v0.21.0 (RB-019.2): a deleted turn's thread id, on its tombstone, so a

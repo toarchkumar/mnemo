@@ -496,15 +496,15 @@ fn two_moves_to_different_statuses_flag_the_task_and_the_later_wins() {
         assert_eq!(history, 3, "taken and the two moves");
         assert_eq!(r.conflicts.get("task").copied(), flag.then_some(1));
         if flag {
-            // A new write of the task drops the mark; the flag stays until
-            // a merge sees one version again.
+            // A new write of the task settles it: the mark and the flag go
+            // at once (REV-019.1).
             let mut db = open(&out);
             db.set_author(Some("worker-a".into()));
             db.task_update("dogfood-the-merge", None, Some("seen the conflict"), None)
                 .unwrap();
             db.close().unwrap();
             let (_, flagged, mark, _) = merged_task(&out);
-            assert!(flagged && !mark);
+            assert!(!flagged && !mark);
             let again = p.out("again.mnemo");
             merge(&out, &p.a, &again, t + 120_000);
             let (status, flagged, mark, _) = merged_task(&again);
@@ -1255,9 +1255,15 @@ fn the_output_has_its_own_data_key_and_stamps_go_past_both_inputs() {
     b.close().unwrap();
     let out = p.out("o.mnemo");
     merge(&p.a, &p.b, &out, wall_ms());
-    let key = |x: &Path| Mnemo::__wrapped_key_for_testing(x).unwrap();
+    // The data keys themselves (RB-020.6): a wrap takes a fresh nonce, so
+    // the wrapped bytes would differ even for one key.
+    let key = |x: &Path| Mnemo::__data_key_for_testing(x, PW).unwrap();
+    assert_eq!(key(&p.a), key(&p.b), "the two copies share the base's key");
     assert_ne!(key(&out), key(&p.a));
-    assert_ne!(key(&out), key(&p.b));
+    assert_ne!(
+        Mnemo::__wrapped_key_for_testing(&out).unwrap(),
+        Mnemo::__wrapped_key_for_testing(&p.a).unwrap()
+    );
     let stamp = |m: &Memory| m.metadata["_mnemo.hlc"].as_u64().unwrap();
     let in_a = stamp(
         &Mnemo::open_read_only(&p.a, PW)
@@ -1329,7 +1335,9 @@ fn an_edit_in_the_same_millisecond_on_each_side_is_never_ancestry() {
 }
 
 #[test]
-fn a_forgotten_record_takes_its_conflict_copies_with_it() {
+fn a_forgotten_record_takes_the_copies_its_forgetting_copy_never_saw() {
+    // RB-019.2: a forgets the record before any merge made a copy of it;
+    // merged with an output that holds the record and its copy, both go.
     let p = pair();
     let t = wall_ms();
     edit_at(&p.a, &p.base_fact, "edited in a", t);
@@ -1337,12 +1345,12 @@ fn a_forgotten_record_takes_its_conflict_copies_with_it() {
     let m = p.out("m.mnemo");
     merge(&p.a, &p.b, &m, t + 2_000);
     let copy_id = copies(&mut open(&m))[0].id;
-    let m2 = p.out("m2.mnemo");
-    copy(&m, &m2);
-    let mut db = open(&m2);
+    let forgot = p.out("forgot.mnemo");
+    copy(&p.a, &forgot);
+    let mut db = open(&forgot);
     db.delete(&p.base_fact).unwrap();
     db.close().unwrap();
-    for (x, y, name) in [(&m2, &m, "fx.mnemo"), (&m, &m2, "fy.mnemo")] {
+    for (x, y, name) in [(&forgot, &m, "fx.mnemo"), (&m, &forgot, "fy.mnemo")] {
         let out = p.out(name);
         let r = merge(x, y, &out, t + 3_000);
         assert!(r.removed.contains(&copy_id), "{r:?}");
@@ -1350,6 +1358,90 @@ fn a_forgotten_record_takes_its_conflict_copies_with_it() {
         assert!(db.get(&p.base_fact).is_err());
         assert!(copies(&mut db).is_empty());
     }
+}
+
+#[test]
+fn forgetting_the_record_that_won_keeps_the_copy_beside_it() {
+    // RB-020.3: a user who forgets the record that won and keeps its copy
+    // keeps the copy through later merges, of the file with itself and
+    // with either input.
+    let p = pair();
+    let t = wall_ms();
+    edit_at(&p.a, &p.base_fact, "edited in a", t);
+    edit_at(&p.b, &p.base_fact, "edited in b", t + 1_000);
+    let m = p.out("m.mnemo");
+    merge(&p.a, &p.b, &m, t + 2_000);
+    let copy_id = copies(&mut open(&m))[0].id;
+    let x = p.out("x.mnemo");
+    copy(&m, &x);
+    let mut db = open(&x);
+    db.delete(&p.base_fact).unwrap();
+    db.close().unwrap();
+    let x2 = p.out("x2.mnemo");
+    copy(&x, &x2);
+    for (a, b, name) in [
+        (&x, &x2, "xx.mnemo"),
+        (&x, &p.a, "xa.mnemo"),
+        (&p.b, &x, "bx.mnemo"),
+        (&x, &m, "xm.mnemo"),
+        (&m, &x, "mx.mnemo"),
+    ] {
+        let out = p.out(name);
+        let r = merge(a, b, &out, t + 3_000);
+        assert!(!r.removed.contains(&copy_id), "{name}: {r:?}");
+        let mut db = Mnemo::open(&out, PW).unwrap();
+        assert!(db.get(&p.base_fact).is_err(), "{name}");
+        let c = copies(&mut db);
+        assert_eq!(c.len(), 1, "{name}");
+        assert_eq!(c[0].content, "edited in a", "{name}");
+    }
+    assert_eq!(records(&p.out("xx.mnemo")), records(&x), "merge(x, x) = x");
+    assert_eq!(records(&p.out("xm.mnemo")), records(&p.out("mx.mnemo")));
+}
+
+#[test]
+fn editing_the_record_that_won_settles_its_copy_and_the_report_says_so() {
+    // RB-020.3 (2), decision.v0210-conflict-flags (3): an edit of the
+    // record settles the conflict; the next merge drops the copy and
+    // counts it.
+    let p = pair();
+    let t = wall_ms();
+    edit_at(&p.a, &p.base_fact, "edited in a", t);
+    edit_at(&p.b, &p.base_fact, "edited in b", t + 1_000);
+    let m = p.out("m.mnemo");
+    merge(&p.a, &p.b, &m, t + 2_000);
+    let copy_id = copies(&mut open(&m))[0].id;
+    let x = p.out("x.mnemo");
+    copy(&m, &x);
+    let mut db = open(&x);
+    db.update(
+        &p.base_fact,
+        MemoryPatch {
+            importance: Some(0.9),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    db.close().unwrap();
+    let x2 = p.out("x2.mnemo");
+    copy(&x, &x2);
+    for (a, b, name) in [
+        (&x, &x2, "xx.mnemo"),
+        (&x, &m, "xm.mnemo"),
+        (&m, &x, "mx.mnemo"),
+    ] {
+        let out = p.out(name);
+        let r = merge(a, b, &out, t + 3_000);
+        assert_eq!(r.settled, vec![copy_id], "{name}");
+        assert!(copies(&mut open(&out)).is_empty(), "{name}");
+    }
+    let r = merge(
+        &p.out("xx.mnemo"),
+        &p.out("xm.mnemo"),
+        &p.out("again.mnemo"),
+        t + 3_000,
+    );
+    assert!(r.settled.is_empty(), "neither holds the copy now");
 }
 
 #[test]
@@ -2556,4 +2648,312 @@ fn a_chain_a_later_version_continues_stays_linked_past_a_version_written_alone()
     assert_eq!(sb(&mut db, &v1), s(&n));
     assert_eq!(sb(&mut db, &n), s(&m));
     assert_eq!(sb(&mut db, &m), None);
+}
+
+#[test]
+fn an_older_builds_keyed_write_over_this_builds_version_follows_it() {
+    // RB-020.1: an older build writes a key over this build's version. Its
+    // version has no first stamp and a creation time an hour before the
+    // first stamp of the one it was written over (this build's clock ran
+    // ahead); the write-made link still puts it after, so it stays live.
+    let p = pair();
+    let t = wall_ms();
+    let mut a = open(&p.a);
+    a.__freeze_hlc_clock_for_testing(Some(t + 3_600_000));
+    let (mine, _) = a
+        .remember_keyed(Memory::new("k by v0.21", MemoryType::Semantic, v(2.0)), "k")
+        .unwrap();
+    a.__write_as_older_build_for_testing(true);
+    let (older, _) = a
+        .remember_keyed(
+            Memory::new("k by an older build", MemoryType::Semantic, v(3.0)),
+            "k",
+        )
+        .unwrap();
+    a.close().unwrap();
+    {
+        let mut ro = Mnemo::open_read_only(&p.a, PW).unwrap();
+        let o = ro.get(&older).unwrap();
+        assert!(meta(&o, "_mnemo.first_hlc").is_none(), "written unstamped");
+        assert!(meta(&o, "_mnemo.hlc").is_none());
+        let h = ro.history_in("k", KeyScope::private_default()).unwrap();
+        assert_eq!(h[0].id, older);
+        assert_eq!(h[1].id, mine);
+    }
+    let a2 = p.out("a2.mnemo");
+    copy(&p.a, &a2);
+    let (out, r) = p.check_laws(t + 3_700_000);
+    assert!(r.conflicts.is_empty(), "{r:?}");
+    for f in [&out, &{
+        let xx = p.out("aa.mnemo");
+        merge(&p.a, &a2, &xx, t + 3_700_000);
+        // merge(a, a) = a, but for the name of this build's version, which
+        // the older build marked superseded in place (RB-020.4); merging
+        // that again changes nothing.
+        let unnamed = |p: &Path| -> Vec<Value> {
+            records(p)
+                .into_iter()
+                .map(|mut r| {
+                    if r["id"] == Value::String(mine.to_string()) {
+                        let md = r["metadata"].as_object_mut().unwrap();
+                        md.remove("_mnemo.ver");
+                        md.remove("_mnemo.hlc_prev");
+                    }
+                    r
+                })
+                .collect()
+        };
+        assert_eq!(unnamed(&xx), unnamed(&p.a), "merge(a, a) = a");
+        let (xx2, again) = (p.out("aa2.mnemo"), p.out("aaaa.mnemo"));
+        copy(&xx, &xx2);
+        merge(&xx, &xx2, &again, t + 3_700_000);
+        assert_eq!(records(&again), records(&xx), "merge(aa, aa) = aa");
+        xx
+    }] {
+        let mut db = Mnemo::open_read_only(f, PW).unwrap();
+        let h = db.history_in("k", KeyScope::private_default()).unwrap();
+        let texts: Vec<&str> = h.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(texts, ["k by an older build", "k by v0.21"]);
+    }
+}
+
+#[test]
+fn versions_an_older_build_wrote_apart_go_by_when_they_were_created() {
+    // RB-020.1: an older build writes one key in each copy, with no
+    // written path between the two versions: x in a, created first, and y
+    // in b, created next; then, a second later, x is edited in place. The
+    // slot goes by when each was created (its id's millisecond), not by
+    // its last write, so y stays live.
+    let p = pair();
+    let write = |path: &Path, text: &str, x: f32| -> (Mnemo, Ulid) {
+        let mut db = open(path);
+        db.__write_as_older_build_for_testing(true);
+        let m = Memory::new(text, MemoryType::Semantic, v(x));
+        let id = db.remember_keyed(m, "k").unwrap().0;
+        (db, id)
+    };
+    let (mut a, x) = write(&p.a, "x, created first", 2.0);
+    let (b, y) = write(&p.b, "y, created next", 3.0);
+    b.close().unwrap();
+    assert!(x.timestamp_ms() < y.timestamp_ms());
+    // The edit is in a later second than y's creation, so its update time
+    // (whole seconds) is after y's id.
+    let next = (y.timestamp_ms() / 1000 + 1) * 1000;
+    std::thread::sleep(std::time::Duration::from_millis(
+        next.saturating_sub(wall_ms()) + 5,
+    ));
+    a.update(
+        &x,
+        MemoryPatch {
+            importance: Some(0.9),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let xm = a.get(&x).unwrap();
+    a.close().unwrap();
+    assert!(meta(&xm, "_mnemo.hlc").is_none(), "written unstamped");
+    let edited = meta(&xm, "_mnemo.updated_at").and_then(Value::as_i64);
+    assert!(
+        edited.is_some_and(|e| e as u64 * 1000 > y.timestamp_ms()),
+        "x's last write is after y's"
+    );
+    let (out, r) = p.check_laws(wall_ms() + 60_000);
+    assert_eq!(r.conflicts.get("key"), Some(&1), "{r:?}");
+    let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+    let h = db.history_in("k", KeyScope::private_default()).unwrap();
+    let ids: Vec<Ulid> = h.iter().map(|m| m.id).collect();
+    assert_eq!(ids, [y, x]);
+}
+
+#[test]
+fn a_conflict_copy_edited_without_changing_its_text_keeps_the_edit() {
+    // A write on a conflict copy that keeps its text (here the same text
+    // and vector it was written with) is still a write: the copy is no longer the one a merge made, so a later
+    // merge keeps it as edited instead of making it again.
+    let p = pair();
+    let t = wall_ms();
+    for (path, text, at, x) in [
+        (&p.a, "the fact, as a has it", t, 2.37),
+        (&p.b, "the fact, as b has it", t + 1_000, 3.41),
+    ] {
+        let mut db = open(path);
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        db.update(
+            &p.base_fact,
+            MemoryPatch {
+                content: Some(text.into()),
+                vector: Some(v(x)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        db.close().unwrap();
+    }
+    let out = p.out("ab.mnemo");
+    merge(&p.a, &p.b, &out, t + 2_000);
+    let copied = {
+        let mut db = open(&out);
+        let id = db
+            .memories()
+            .unwrap()
+            .into_iter()
+            .find(|m| m.metadata.contains_key("_mnemo.merge_source"))
+            .expect("a conflict copy")
+            .id;
+        let before = db.get(&id).unwrap();
+        db.update(
+            &id,
+            MemoryPatch {
+                content: Some(before.content.clone()),
+                // the vector a wrote it with, as given (it's stored rounded)
+                vector: Some(v(2.37)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let after = db.get(&id).unwrap();
+        assert_ne!(
+            meta(&after, "_mnemo.hlc"),
+            meta(&before, "_mnemo.hlc"),
+            "a new write"
+        );
+        assert!(meta(&after, "_mnemo.merge_heads").is_none());
+        db.close().unwrap();
+        id
+    };
+    let out2 = p.out("ab2.mnemo");
+    copy(&out, &out2);
+    for (name, other) in [("xx", &out2), ("xa", &p.a), ("xb", &p.b)] {
+        let again = p.out(&format!("{name}.mnemo"));
+        merge(&out, other, &again, t + 3_000);
+        let mut db = Mnemo::open_read_only(&again, PW).unwrap();
+        let c = db.get(&copied).unwrap();
+        assert!(
+            meta(&c, "_mnemo.merge_heads").is_none(),
+            "{name}: kept as written"
+        );
+        assert_eq!(c.content, "the fact, as a has it", "{name}");
+    }
+    assert_eq!(records(&p.out("xx.mnemo")), records(&out), "merge(x,x) = x");
+}
+
+#[test]
+fn a_keyed_manifest_rewritten_in_both_copies_leaves_one_live_manifest() {
+    // RB-020.6 (5): the manifest's key slot is relinked like a fact's.
+    let p = pair();
+    let t = wall_ms();
+    {
+        let mut a = open(&p.a);
+        let mut m = Memory::scaffold_manifest(4);
+        m.content = "the manifest, keyed".into();
+        a.remember_keyed(m, "manifest").unwrap();
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+    }
+    for (path, text, at) in [
+        (&p.a, "rewritten in a", t),
+        (&p.b, "rewritten in b", t + 1_000),
+    ] {
+        let mut db = open(path);
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        let mut m = Memory::scaffold_manifest(4);
+        m.content = text.into();
+        db.remember_keyed(m, "manifest").unwrap();
+        db.close().unwrap();
+    }
+    let (out, r) = p.check_laws(t + 2_000);
+    assert_eq!(r.conflicts.get("key"), Some(&1), "{r:?}");
+    let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+    let live: Vec<String> = db
+        .memories()
+        .unwrap()
+        .into_iter()
+        .filter(|m| {
+            meta(m, "_mnemo.key").and_then(Value::as_str) == Some("manifest")
+                && meta(m, "_mnemo.superseded_by").is_none()
+        })
+        .map(|m| m.content)
+        .collect();
+    assert_eq!(live, ["rewritten in b"]);
+}
+
+#[test]
+fn one_essence_version_written_twice_alike_merges_alike_in_every_grouping() {
+    // RB-020.4: b, and d (copied from a after a's edit), write the item's
+    // same text in one millisecond, so their versions are one (the same
+    // stamp and hash); d's lists a's edit among the ones before and b's
+    // doesn't. c resolves the item. Every grouping drops a's edit from the
+    // item's heads, as d's ancestry says.
+    let ver = |p: &Path, id: &Ulid| -> (Value, Value) {
+        let m = Mnemo::open_read_only(p, PW).unwrap().get(id).unwrap();
+        (
+            m.metadata["_mnemo.hlc"].clone(),
+            m.metadata["_mnemo.ver"].clone(),
+        )
+    };
+    for attempt in 0.. {
+        let dir = tempfile::tempdir().unwrap();
+        let base_path = dir.path().join("base.mnemo");
+        base(&base_path);
+        let mut db = open(&base_path);
+        let item = db
+            .essence_add(
+                EssenceScope::Project,
+                EssenceSection::Open,
+                "an open item",
+                None,
+            )
+            .unwrap();
+        db.close().unwrap();
+        let o = |n: &str| dir.path().join(n);
+        let [a, b, c, d] = ["a", "b", "c", "d"].map(|n| o(&format!("{n}.mnemo")));
+        for x in [&a, &b, &c] {
+            copy(&base_path, x);
+        }
+        let t = wall_ms() + 10_000;
+        let at = |p: &Path, ms: u64, f: &dyn Fn(&mut Mnemo)| {
+            let mut db = open(p);
+            db.__freeze_hlc_clock_for_testing(Some(ms));
+            f(&mut db);
+            db.close().unwrap();
+        };
+        at(&a, t, &|db| {
+            db.essence_update(&item, "take 3", None).unwrap();
+        });
+        copy(&a, &d);
+        for p in [&b, &d] {
+            at(p, t + 1_000, &|db| {
+                db.essence_update(&item, "take 2", None).unwrap();
+            });
+        }
+        at(&c, t + 1_000, &|db| {
+            db.essence_resolve(&item).unwrap();
+        });
+        if ver(&b, &item) != ver(&d, &item) {
+            // The two edits fell in different seconds (`updated_at`).
+            assert!(
+                attempt < 5,
+                "b's and d's edits never came out as one version"
+            );
+            continue;
+        }
+        let now = t + 2_000;
+        let m = |x: &Path, y: &Path, n: &str| {
+            merge(x, y, &o(n), now);
+            o(n)
+        };
+        let g1 = m(&m(&m(&a, &b, "ab"), &c, "ab_c"), &d, "ab_c_d");
+        let g2 = m(&a, &m(&b, &m(&c, &d, "cd"), "b_cd"), "a_b_cd");
+        let g3 = m(&m(&a, &d, "ad"), &m(&b, &c, "bc"), "ad_bc");
+        let g4 = m(&m(&d, &c, "dc"), &m(&b, &a, "ba"), "dc_ba");
+        for (g, name) in [
+            (&g2, "a+(b+(c+d))"),
+            (&g3, "(a+d)+(b+c)"),
+            (&g4, "(d+c)+(b+a)"),
+        ] {
+            assert_same_records(g, &g1, name);
+        }
+        break;
+    }
 }

@@ -1618,6 +1618,7 @@ impl Mnemo {
     /// `stamp`: a write from this build (not a copy of a record already in
     /// a file), so it gets a fresh `_mnemo.hlc`.
     fn put_checked(&mut self, mut m: Memory, refuse_zero: bool, stamp: bool) -> Result<Ulid> {
+        let stamp = stamp && !self.hlc_clock.older_build;
         if m.vector.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
@@ -1679,15 +1680,60 @@ impl Mnemo {
             // the ones before, so a merge can tell this one descends from
             // it; then this version's own hash.
             let old_ver = m.metadata.get(MNEMO_META_VER).and_then(Value::as_u64);
+            let live = self
+                .index
+                .get(id_u, &self.catalog)
+                .filter(|&i| !self.catalog[i].deleted);
             if let (true, Some(v)) = (prev > 0, old_ver) {
                 let mut before = hlc_prev(&m);
                 before.insert((prev, v));
                 set_hlc_prev(&mut m, before);
+            } else if let Some(i) = live {
+                // RB-020.1 (3), RB-020.5: this build's first rewrite of a
+                // record an older build wrote (no version hash). The
+                // stored record (one decrypt) is listed among the earlier
+                // versions as a merge sees an unstamped one, so the edit
+                // descends from the copy that wasn't edited; and it's
+                // given the first stamp an older build never wrote, from
+                // when it was created (its id's millisecond), so its place
+                // in its key's chain
+                // doesn't move when it's superseded.
+                let entry = self.catalog[i].clone();
+                let old = self.read_memory(&entry)?;
+                let mut before = hlc_prev(&m);
+                before.insert(super::merge::own_pair(&old));
+                set_hlc_prev(&mut m, before);
+                let first = old
+                    .metadata
+                    .get(crate::memory::MNEMO_META_FIRST_HLC)
+                    .cloned()
+                    .unwrap_or_else(|| Value::from((old.id.0 >> 80) as u64));
+                m.metadata
+                    .entry(crate::memory::MNEMO_META_FIRST_HLC.to_string())
+                    .or_insert(first);
             }
             // A new write is one version, not the merge's combination.
             m.metadata.remove(crate::memory::MNEMO_META_MERGE_HEADS);
             m.metadata
                 .remove(crate::memory::MNEMO_META_MERGE_STATUS_CONFLICT);
+            // REV-019.1, RB-020.4: so an essence item's, a task's or a
+            // finding's flag, which follows the versions it combines, is
+            // settled by it at once, unless a merge's rename of it stands.
+            let follows_heads = matches!(
+                m.metadata.get(MNEMO_META_KIND).and_then(Value::as_str),
+                Some(
+                    crate::memory::MNEMO_META_KIND_ESSENCE
+                        | crate::memory::MNEMO_META_KIND_TASK
+                        | crate::memory::MNEMO_META_KIND_FINDING
+                )
+            );
+            if follows_heads
+                && !m
+                    .metadata
+                    .contains_key(crate::memory::MNEMO_META_MERGE_NAME)
+            {
+                m.metadata.remove(crate::memory::MNEMO_META_MERGE_CONFLICT);
+            }
             // A new record's links are its own write's
             // (decision.v0210-chain-rule). A rewrite in place keeps the mark,
             // since the link it marks is unchanged.
