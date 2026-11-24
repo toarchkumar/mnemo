@@ -20,6 +20,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
   brain's own directory, and a brain with unfinished work (`mnemo verify
   --recover` finishes it). The guide has a short "Back up the brain"
   section: the key's backup is the recovery code, kept apart (v0211-1, G13)
+- **`mnemo task take <slug>`** (and `Mnemo::task_take`, the MCP `task`
+  tool's `take`): take the task a pointer names, as `task next` takes one,
+  with the same claim. It's refused when the task's `after` tasks aren't
+  done (it names them), when it's `ready` or `done`, and when another
+  agent's claim on it is live (v0211-2, G17)
+- **`mnemo task update <slug> --after <slugs>`** (and
+  `Mnemo::task_set_after`, the MCP `update` with `after`): a task's creator
+  changes what it waits for, refusing a cycle; the change is a note in its
+  history (v0211-2, G17)
+
+### Changed
+
+- The guide says a task or finding a merge renamed (`<name>-merge-2`)
+  stays flagged while the rename stands, as the 0.21.0 notes do (v0211-2)
 
 ## [0.21.0] — 2026-11-23
 

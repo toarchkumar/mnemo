@@ -729,3 +729,179 @@ fn a_tasks_refs_round_trip() {
         Some(vec!["RB-014.1".to_string()])
     );
 }
+
+/// v0.21.1 (G17): `task_take` takes the task a pointer names, as
+/// `task_next` would, with the same claim; it refuses a task whose `after`
+/// tasks aren't done (naming them), the wrong role, `ready` and `done`, and
+/// a live claim; and takes back an `active` task once its claim lapsed.
+#[test]
+fn take_takes_the_named_task_with_next_s_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = brain(dir.path());
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    as_agent(&mut db, "planner-a");
+    db.task_add(&spec("First", Some("worker"), &[])).unwrap();
+    db.task_add(&spec("Second", Some("worker"), &["first"]))
+        .unwrap();
+    db.task_add(&spec("Third", Some("worker"), &[])).unwrap();
+    db.task_add(&spec("Review", Some("reviewer"), &[])).unwrap();
+    as_agent(&mut db, "worker-a");
+
+    let e = db
+        .task_take("second", Some("worker"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("second waits for first to be done"), "{e}");
+    let e = db
+        .task_take("review", Some("worker"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("is for role reviewer, not worker"), "{e}");
+    let e = db
+        .task_take("nope", Some("worker"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("no task"), "{e}");
+
+    // Third, though First is older: what next would do, for the named one.
+    let t = db.task_take("third", Some("worker")).unwrap();
+    assert_eq!(
+        (
+            t.task.slug.as_str(),
+            t.task.status.as_str(),
+            t.task.owner.as_deref()
+        ),
+        ("third", "active", Some("worker-a"))
+    );
+    assert!(t.reclaimed_from.is_none());
+    let last = t.task.history.last().unwrap();
+    assert_eq!(
+        (last["from"].as_str(), last["to"].as_str()),
+        (Some("queued"), Some("active"))
+    );
+    // The claim is next's: the token passes update's strict check.
+    let o = db
+        .task_update("third", None, Some("on it"), Some(&t.token))
+        .unwrap();
+    assert!(matches!(o, TaskOutcome::Updated(_, Some(_))));
+    // Next still gives the oldest one left.
+    assert_eq!(
+        db.task_next(Some("worker")).unwrap().unwrap().task.slug,
+        "first"
+    );
+
+    // Live claim: another worker is refused, by name.
+    as_agent(&mut db, "worker-b");
+    let e = db
+        .task_take("third", Some("worker"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("third is worker-a's: its claim is worker-a's until"),
+        "{e}"
+    );
+    // Lapsed: taken back, as next does.
+    db.__set_clock_offset_for_testing(TASK_CLAIM_TTL + 1);
+    let b = db.task_take("third", Some("worker")).unwrap();
+    assert_eq!(b.reclaimed_from.as_deref(), Some("worker-a"));
+    assert_eq!(b.task.owner.as_deref(), Some("worker-b"));
+    db.task_update("third", Some("ready"), None, Some(&b.token))
+        .unwrap();
+    let e = db
+        .task_take("third", Some("worker"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("third is ready: there's nothing to take"), "{e}");
+}
+
+/// v0.21.1 (G17): `task_set_after` lets a task's creator change what it
+/// waits for, so `task_next` gives the tasks in the new order; anyone else,
+/// a missing slug, the task itself, a cycle and a done task are refused.
+#[test]
+fn set_after_changes_the_order_next_follows() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = brain(dir.path());
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    as_agent(&mut db, "planner-a");
+    // As v0210-7 and v0210-6b stood: 7 older and waiting for 6 (done).
+    db.task_add(&spec("Six", Some("worker"), &[])).unwrap();
+    db.task_add(&spec("Seven", Some("worker"), &["six"]))
+        .unwrap();
+    db.task_add(&spec("Six b", Some("worker"), &[])).unwrap();
+    as_agent(&mut db, "worker-a");
+    let t = db.task_next(Some("worker")).unwrap().unwrap();
+    db.task_update("six", Some("ready"), None, Some(&t.token))
+        .unwrap();
+    as_agent(&mut db, "planner-a");
+    db.task_update("six", Some("done"), None, None).unwrap();
+
+    // The Planner puts six-b in front of seven.
+    let (t, o) = db
+        .task_set_after("seven", &["six".into(), "six-b".into()])
+        .unwrap();
+    assert_eq!(
+        (t.after.clone(), o),
+        (
+            vec!["six".to_string(), "six-b".to_string()],
+            WriteOutcome::Updated
+        )
+    );
+    let last = t.history.last().unwrap();
+    assert_eq!(
+        (
+            last["by"].as_str(),
+            last["note"].as_str(),
+            last["to"].as_str()
+        ),
+        (Some("planner-a"), Some("after: six, six-b"), Some("queued"))
+    );
+    // The same list again (a duplicate and spaces aside) changes nothing.
+    let (_, o) = db
+        .task_set_after("seven", &["six".into(), " six-b ".into(), "six".into()])
+        .unwrap();
+    assert_eq!(o, WriteOutcome::Unchanged);
+    as_agent(&mut db, "worker-a");
+    assert_eq!(
+        db.task_next(Some("worker")).unwrap().unwrap().task.slug,
+        "six-b"
+    );
+    assert!(db.task_next(Some("worker")).unwrap().is_none());
+
+    // Refusals.
+    let e = db.task_set_after("seven", &[]).unwrap_err().to_string();
+    assert!(e.contains("seven is planner-a's task"), "{e}");
+    as_agent(&mut db, "planner-a");
+    for (after, want) in [
+        (vec!["nope"], "no task"),
+        (vec!["seven"], "can't wait for itself"),
+    ] {
+        let after: Vec<String> = after.into_iter().map(String::from).collect();
+        let e = db.task_set_after("seven", &after).unwrap_err().to_string();
+        assert!(e.contains(want), "{e}");
+    }
+    db.task_add(&spec("Eight", Some("worker"), &["seven"]))
+        .unwrap();
+    let e = db
+        .task_set_after("seven", &["eight".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("wait for itself, through the tasks it waits for"),
+        "{e}"
+    );
+    let e = db.task_set_after("six", &[]).unwrap_err().to_string();
+    assert!(e.contains("six is done"), "{e}");
+
+    // An empty list waits for nothing: seven can be taken now.
+    let (t, _) = db.task_set_after("seven", &[]).unwrap();
+    assert!(t.after.is_empty());
+    assert_eq!(
+        t.history.last().unwrap()["note"].as_str(),
+        Some("after: none")
+    );
+    as_agent(&mut db, "worker-a");
+    assert_eq!(
+        db.task_take("seven", Some("worker")).unwrap().task.slug,
+        "seven"
+    );
+}

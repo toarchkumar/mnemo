@@ -1245,3 +1245,74 @@ fn no_tool_returns_vectors_unless_asked() {
         assert!(legacy.iter().all(|m| m["vector"].is_array()));
     });
 }
+
+/// v0.21.1 (G17): the task tool's `take` takes the task a slug names, and
+/// `update` with `after` alone lets its creator change what it waits for.
+#[test]
+fn the_task_tool_takes_a_named_task_and_reorders() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "planner-a"), ("MNEMO_ROLE", "planner")],
+            &[
+                tool(
+                    "task",
+                    json!({"op": "add", "title": "First", "role": "worker"}),
+                ),
+                tool(
+                    "task",
+                    json!({"op": "add", "title": "Second", "role": "worker", "after": ["first"]}),
+                ),
+                tool(
+                    "task",
+                    json!({"op": "update", "slug": "second", "after": []}),
+                ),
+                tool(
+                    "task",
+                    json!({"op": "update", "slug": "second", "after": ["first"], "note": "x"}),
+                ),
+            ],
+        );
+        let t = |r: &Value| -> Value {
+            serde_json::from_str(ok(r)["content"][0]["text"].as_str().unwrap()).unwrap()
+        };
+        let set = t(&rs[3]);
+        assert_eq!(
+            (set["outcome"].as_str(), set["after"].clone()),
+            (Some("updated"), json!([]))
+        );
+        let r = &rs[4];
+        assert!(
+            r["error"].is_object() || r["result"]["isError"] == json!(true),
+            "after goes alone: {r}"
+        );
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "worker-a"), ("MNEMO_ROLE", "worker")],
+            &[
+                tool("task", json!({"op": "take", "slug": "second"})),
+                tool(
+                    "task",
+                    json!({"op": "update", "slug": "first", "after": []}),
+                ),
+            ],
+        );
+        let took = ok(&rs[1])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(took.starts_with(guide::FRAMING), "{took}");
+        assert!(
+            took.contains("\"slug\":\"second\"") && took.contains("\"token\""),
+            "{took}"
+        );
+        let r = &rs[2];
+        assert!(
+            r["error"].is_object() || r["result"]["isError"] == json!(true),
+            "only the creator reorders: {r}"
+        );
+    });
+}

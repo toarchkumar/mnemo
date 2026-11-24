@@ -327,7 +327,9 @@ keeps the copy, which then stands alone. A key written in both copies is
 one chain, the newer version live and the other flagged: write the key
 again (`mnemo remember merged.mnemo --key <key> --text "<what it should
 say>"`) to settle it. An essence item, task or finding changed in both is
-flagged until you next change it.
+flagged until you next change it. A task or finding added under one name
+in both copies keeps both: the later is renamed `<name>-merge-2`, and it
+stays flagged while the rename stands.
 
 To make the merged file the project brain, close the sessions that have
 the brain open, keep the old one, and move the merged file into its
@@ -438,6 +440,9 @@ MNEMO_AGENT=worker-a MNEMO_ROLE=worker mnemo task next
 mnemo task update fix-the-flaky-upload-test --note "the retry was racing the upload" --as worker-a
 mnemo task update fix-the-flaky-upload-test --status ready --as worker-a
 mnemo task update fix-the-flaky-upload-test --status done --as planner-a
+mnemo task add "Update the changelog" --for worker --as planner-a
+mnemo task update write-the-release-notes --after update-the-changelog --as planner-a
+MNEMO_AGENT=worker-a MNEMO_ROLE=worker mnemo task take update-the-changelog
 mnemo task list
 ```
 
@@ -445,9 +450,12 @@ mnemo task list
   tasks are done, makes it yours, and holds it with a claim for 2 hours.
   Your own task whose claim lapsed comes back to you first, and a task
   whose owner went quiet is taken back.
+- **`task take <slug>`** takes the task a pointer names, the same way,
+  once its `--after` tasks are done.
 - **`task update`** moves your task along: `--status ready` when you're
   finished, `blocked`, `queued` to hand it back, `active` again, or a
-  `--note`. Each renews your claim.
+  `--note`. Each renews your claim. A task's creator changes what it
+  waits for with `--after <slug>[,<slug>]`.
 - **`lost`** means another agent took the task back after your claim
   lapsed. Stop working on it.
 - **`ready` waits for the task's creator to set `done`,** unless it's

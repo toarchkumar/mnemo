@@ -1652,9 +1652,16 @@ enum TaskCmd {
     /// Prints its slug, the claim token, the expiry and the title; exits 1
     /// when there's nothing to take.
     Next,
+    /// v0.21.1: take the task a pointer names, as `next` takes one: the
+    /// same claim, printed the same way. For your role (`--role`, else
+    /// `MNEMO_ROLE`). Refused, exit 1, when its `after` tasks aren't done
+    /// (it names them), when it's ready or done, and when another agent's
+    /// claim on it is live.
+    Take { slug: String },
     /// Move your task along (`--status ready|blocked|queued|active|done`)
     /// or add a `--note`. Exits 1 with `lost` when another agent took it
-    /// back.
+    /// back. As its creator, `--after <slug>[,<slug>]` changes what it
+    /// waits for (`--after ""`: nothing), refusing a cycle.
     Update {
         slug: String,
         #[arg(long)]
@@ -1664,6 +1671,11 @@ enum TaskCmd {
         /// The claim token `next` printed, for the strict check.
         #[arg(long)]
         token: Option<String>,
+        /// v0.21.1: the slugs it waits for now (comma-separated), replacing
+        /// its `after`; its creator's. Goes alone, without `--status`,
+        /// `--note` or `--token`.
+        #[arg(long, value_delimiter = ',', conflicts_with_all = ["status", "note", "token"])]
+        after: Option<Vec<String>>,
     },
     /// The tasks, oldest first.
     List {
@@ -5527,7 +5539,10 @@ fn run() -> std::result::Result<(), String> {
             if agent.is_some()
                 && matches!(
                     cmd,
-                    TaskCmd::Add { .. } | TaskCmd::Next | TaskCmd::Update { .. }
+                    TaskCmd::Add { .. }
+                        | TaskCmd::Next
+                        | TaskCmd::Take { .. }
+                        | TaskCmd::Update { .. }
                 )
             {
                 let _ = db.touch_presence(role.as_deref(), Some("cli"));
@@ -5603,11 +5618,39 @@ fn run() -> std::result::Result<(), String> {
                             .unwrap_or("no role".into())
                     )),
                 },
+                TaskCmd::Take { slug } => {
+                    let t = db.task_take(slug, role.as_deref()).map_err(fmt)?;
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        t.task.slug,
+                        t.token,
+                        export::rfc3339(t.expires_at),
+                        t.task.title
+                    );
+                    if let Some(o) = &t.reclaimed_from {
+                        eprintln!("mnemo: taken back from {o}, whose claim lapsed");
+                    }
+                    Ok(())
+                }
+                TaskCmd::Update {
+                    slug,
+                    after: Some(after),
+                    ..
+                } => {
+                    let (t, o) = db.task_set_after(slug, after).map_err(fmt)?;
+                    let o = match o {
+                        mnemo_engine::WriteOutcome::Unchanged => "unchanged",
+                        _ => "updated",
+                    };
+                    println!("{}\t{o}\tafter: {}", t.slug, t.after.join(","));
+                    Ok(())
+                }
                 TaskCmd::Update {
                     slug,
                     status,
                     note,
                     token,
+                    after: None,
                 } => {
                     match db
                         .task_update(slug, status.as_deref(), note.as_deref(), token.as_deref())
