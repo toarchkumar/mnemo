@@ -102,6 +102,7 @@ fn mirrored(r: &MergeReport) -> MergeReport {
     std::mem::swap(&mut m.a_only, &mut m.b_only);
     m.lead_ms.swap(0, 1);
     m.hlc_since.swap(0, 1);
+    m.local.swap(0, 1);
     for k in &mut m.kept_keys {
         k.deleted_in = k.deleted_in.other();
     }
@@ -620,6 +621,7 @@ fn each_refusal_says_why() {
     };
     let e = try_merge(&p.a, &other, &p.out("o1.mnemo"));
     assert!(e.contains("aren't copies of one brain"), "{e}");
+    assert!(e.contains("two separate brains"), "{e}");
     let e = try_merge(&p.a, &p.b, &p.b);
     assert!(e.contains("is one of the inputs"), "{e}");
     let exists = p.out("exists.mnemo");
@@ -1133,6 +1135,7 @@ fn more_refusals_say_why() {
     b.close().unwrap();
     let e = try_merge(&p.a, pw, &p.b, pw, &p.out("o1.mnemo"));
     assert!(e.contains("embedders differ"), "{e}");
+    assert!(e.contains("mnemo reembed"), "{e}");
     // Float vectors on one side only.
     let floats = p.out("floats.mnemo");
     let mut c = cfg();
@@ -1196,9 +1199,20 @@ fn an_input_that_needs_a_write_open_is_refused_with_the_fix() {
         .unwrap_err()
         .to_string();
         assert!(
-            e.contains("needs a read-write open") && e.contains("mnemo index"),
+            e.contains("left unfinished") && e.contains("mnemo verify --recover"),
             "{e}"
         );
+        // What the hint does: one read-write open, then the merge goes.
+        Mnemo::open(&path, PW).unwrap().close().unwrap();
+        Mnemo::merge_files(
+            &p.a,
+            MergeSecret::Passphrase(PW),
+            &path,
+            MergeSecret::Passphrase(PW),
+            p.out("o.mnemo"),
+            &MergeOptions::default(),
+        )
+        .unwrap();
         found = true;
         break;
     }
@@ -2767,10 +2781,163 @@ fn versions_an_older_build_wrote_apart_go_by_when_they_were_created() {
 }
 
 #[test]
+fn a_new_write_of_a_key_settles_the_version_a_merge_flagged() {
+    // REV-019.1: a merge flags the version that lost (a's); a new write of
+    // the key in the output settles it at once (no flag, marked settled),
+    // and no later merge flags it again, with the output as it was merged
+    // or with either input.
+    let p = pair();
+    let t = wall_ms();
+    {
+        let mut a = open(&p.a);
+        a.remember_keyed(Memory::new("k is zero", MemoryType::Semantic, v(1.0)), "k")
+            .unwrap();
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+    }
+    let va = {
+        let (mut a, mut b) = (open(&p.a), open(&p.b));
+        a.__freeze_hlc_clock_for_testing(Some(t));
+        b.__freeze_hlc_clock_for_testing(Some(t + 1_000));
+        let (va, _) = a
+            .remember_keyed(Memory::new("k is a", MemoryType::Semantic, v(2.0)), "k")
+            .unwrap();
+        b.remember_keyed(Memory::new("k is b", MemoryType::Semantic, v(3.0)), "k")
+            .unwrap();
+        a.close().unwrap();
+        b.close().unwrap();
+        va
+    };
+    let out = p.out("ab.mnemo");
+    merge(&p.a, &p.b, &out, t + 2_000);
+    assert!(flagged(&out, &va));
+    let merged = p.out("ab0.mnemo");
+    copy(&out, &merged);
+    {
+        let mut db = open(&out);
+        db.__freeze_hlc_clock_for_testing(Some(t + 3_000));
+        db.remember_keyed(Memory::new("k is c", MemoryType::Semantic, v(4.0)), "k")
+            .unwrap();
+        let m = db.get(&va).unwrap();
+        assert_eq!(meta(&m, MNEMO_META_MERGE_CONFLICT), None, "settled at once");
+        assert_eq!(meta(&m, "_mnemo.merge_settled"), Some(&Value::Bool(true)));
+        assert!(db.merge_conflicts().unwrap().is_empty());
+        db.close().unwrap();
+    }
+    for (name, other) in [("x0", &merged), ("xa", &p.a), ("xb", &p.b)] {
+        let again = p.out(&format!("{name}.mnemo"));
+        let r = merge(&out, other, &again, t + 4_000);
+        assert!(r.conflicts.is_empty(), "{name}: {r:?}");
+        assert!(!flagged(&again, &va), "{name}");
+        let mut db = Mnemo::open_read_only(&again, PW).unwrap();
+        let h = db.history_in("k", KeyScope::private_default()).unwrap();
+        let texts: Vec<&str> = h.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(texts, ["k is c", "k is b", "k is a", "k is zero"], "{name}");
+        assert!(db.merge_conflicts().unwrap().is_empty(), "{name}");
+    }
+}
+
+fn flagged_in(db: &mut Mnemo, id: &Ulid) -> bool {
+    meta(&db.get(id).unwrap(), MNEMO_META_MERGE_CONFLICT) == Some(&Value::Bool(true))
+}
+
+#[test]
+fn a_keyed_writes_created_at_is_its_ids_second() {
+    // A merge takes a deleted version's creation from its id, and a key's
+    // `_mnemo.invalid_at` is the next version's creation: the two must
+    // name the same second, or merging a file with itself moves it by one
+    // across a second boundary. A keyed write keeps the id `Memory::new`
+    // made with its `created_at`, and one that reuses an id takes a new id
+    // and a `created_at` from the same clock read.
+    let p = pair();
+    let mut db = open(&p.a);
+    for i in 0..20 {
+        let (id, _) = db
+            .remember_keyed(
+                Memory::new(format!("k is {i}"), MemoryType::Semantic, v(i as f32 + 1.0)),
+                "k",
+            )
+            .unwrap();
+        let m = db.get(&id).unwrap();
+        assert_eq!(m.created_at, (id.timestamp_ms() / 1000) as i64);
+    }
+    let existing = db.get(&p.base_fact).unwrap();
+    let mut reused = Memory::new("k is reused", MemoryType::Semantic, v(30.0));
+    reused.id = existing.id;
+    let (id, _) = db.remember_keyed(reused, "k").unwrap();
+    assert_ne!(id, existing.id, "a keyed write is a new record");
+    let m = db.get(&id).unwrap();
+    assert_eq!(m.created_at, (id.timestamp_ms() / 1000) as i64);
+    assert_eq!(db.get(&p.base_fact).unwrap().content, existing.content);
+}
+
+#[test]
+fn a_settled_version_stays_settled_when_the_version_it_lost_to_is_forgotten() {
+    // REV-019.1 with RB-020.4: a's version lost to b's in a merge and was
+    // flagged; a write of a's version settles it, and b's version is then
+    // forgotten, which ends a's chain at it. A version that lost keeps the
+    // flag an input gave it there, but not one a write settled: merged with
+    // the output as it was (a's version flagged), it stays unflagged.
+    let p = pair();
+    let t = wall_ms();
+    {
+        let mut a = open(&p.a);
+        a.remember_keyed(Memory::new("k is zero", MemoryType::Semantic, v(1.0)), "k")
+            .unwrap();
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+    }
+    let (va, vb) = {
+        let (mut a, mut b) = (open(&p.a), open(&p.b));
+        a.__freeze_hlc_clock_for_testing(Some(t));
+        b.__freeze_hlc_clock_for_testing(Some(t + 1_000));
+        let (va, _) = a
+            .remember_keyed(Memory::new("k is a", MemoryType::Semantic, v(2.0)), "k")
+            .unwrap();
+        let (vb, _) = b
+            .remember_keyed(Memory::new("k is b", MemoryType::Semantic, v(3.0)), "k")
+            .unwrap();
+        a.close().unwrap();
+        b.close().unwrap();
+        (va, vb)
+    };
+    let out = p.out("ab.mnemo");
+    merge(&p.a, &p.b, &out, t + 2_000);
+    assert!(flagged(&out, &va));
+    let merged = p.out("ab0.mnemo");
+    copy(&out, &merged);
+    {
+        let mut db = open(&out);
+        db.__freeze_hlc_clock_for_testing(Some(t + 3_000));
+        db.update(
+            &va,
+            MemoryPatch {
+                importance: Some(0.9),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(!flagged_in(&mut db, &va));
+        assert_eq!(
+            meta(&db.get(&va).unwrap(), "_mnemo.merge_settled"),
+            Some(&Value::Bool(true))
+        );
+        db.delete(&vb).unwrap();
+        db.close().unwrap();
+    }
+    let again = p.out("x0.mnemo");
+    merge(&out, &merged, &again, t + 4_000);
+    assert!(!flagged(&again, &va), "settled, so no kept flag");
+}
+
+#[test]
 fn a_conflict_copy_edited_without_changing_its_text_keeps_the_edit() {
     // A write on a conflict copy that keeps its text (here the same text
-    // and vector it was written with) is still a write: the copy is no longer the one a merge made, so a later
-    // merge keeps it as edited instead of making it again.
+    // and vector it was written with) is still a write: the copy is no
+    // longer the one a merge made, so a later merge keeps it as written
+    // instead of making it again. The write settles its flag at once
+    // (REV-019.1), and a merge with the output as it was merged, where the
+    // copy is still flagged, keeps it settled.
     let p = pair();
     let t = wall_ms();
     for (path, text, at, x) in [
@@ -2792,6 +2959,8 @@ fn a_conflict_copy_edited_without_changing_its_text_keeps_the_edit() {
     }
     let out = p.out("ab.mnemo");
     merge(&p.a, &p.b, &out, t + 2_000);
+    let merged = p.out("ab0.mnemo");
+    copy(&out, &merged);
     let copied = {
         let mut db = open(&out);
         let id = db
@@ -2819,12 +2988,14 @@ fn a_conflict_copy_edited_without_changing_its_text_keeps_the_edit() {
             "a new write"
         );
         assert!(meta(&after, "_mnemo.merge_heads").is_none());
+        assert!(meta(&before, MNEMO_META_MERGE_CONFLICT).is_some());
+        assert!(!flagged_in(&mut db, &id), "settled at once");
         db.close().unwrap();
         id
     };
     let out2 = p.out("ab2.mnemo");
     copy(&out, &out2);
-    for (name, other) in [("xx", &out2), ("xa", &p.a), ("xb", &p.b)] {
+    for (name, other) in [("xx", &out2), ("x0", &merged), ("xa", &p.a), ("xb", &p.b)] {
         let again = p.out(&format!("{name}.mnemo"));
         merge(&out, other, &again, t + 3_000);
         let mut db = Mnemo::open_read_only(&again, PW).unwrap();
@@ -2832,6 +3003,11 @@ fn a_conflict_copy_edited_without_changing_its_text_keeps_the_edit() {
         assert!(
             meta(&c, "_mnemo.merge_heads").is_none(),
             "{name}: kept as written"
+        );
+        assert_eq!(
+            meta(&c, MNEMO_META_MERGE_CONFLICT),
+            None,
+            "{name}: its write settled it"
         );
         assert_eq!(c.content, "the fact, as a has it", "{name}");
     }

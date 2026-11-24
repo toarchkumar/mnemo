@@ -130,7 +130,10 @@ aren't published in this release: they stay at 0.20.0.
   and a copy written since the merge that made it, even with its text
   unchanged, is kept as written rather than made again.
   A new write of a flagged essence item, task or finding settles its flag
-  at once, unless a merge's rename of it stands (REV-019.1). A key's
+  at once, unless a merge's rename of it stands (REV-019.1); so does a
+  write of a flagged conflict copy, and a new version of a key settles
+  the versions a merge flagged before it, marked `_mnemo.merge_settled`,
+  which a merge counts as followed by a write and never flags again. A key's
   version forgotten after a merge put it after another keeps that place on
   its tombstone (`_mnemo.tombstone_after`), so the chain stays ended there
   and the version that lost to it keeps its flag; two copies of a key's
@@ -146,7 +149,9 @@ aren't published in this release: they stay at 0.20.0.
   later write of the key came after (decision.v0210-5f-older-builds).
   A new record's `created_at` and its id's time now come from one clock
   read, so they name the same second (a merge reads a deleted version's
-  creation from its id; across a second boundary the two could differ).
+  creation from its id; across a second boundary the two could differ),
+  and a keyed write keeps that id instead of taking a new one (unless the
+  file already has a record with it).
   This build's first edit of a record an older build wrote lists that
   version among the ones before it, and gives it a first stamp from when
   it was created, so an edit in one copy wins with no conflict copy
@@ -159,12 +164,26 @@ aren't published in this release: they stay at 0.20.0.
   never loses a version. `MergeReport` gives what
   came from each side, conflicts by kind, removals, keys deleted on one
   side and written on the other, renamed tasks and findings, `after`
-  cycles, each input's clock lead, the older deletes kept as tombstones
-  and the conflict copies settled. Refused, with the reason: not one
-  brain, different embedders, dimensions or float-vector settings, an
-  input older than format 9 or needing a read-write open, an output that
-  exists or is an input. Fixtures written by the published v0.20.2 are in
+  cycles, each input's clock lead, the older deletes kept as tombstones,
+  the conflict copies settled, each flagged record's key, task slug or
+  finding id (`conflict_labels`; the CLI's table lists the first ten
+  flagged records) and each input's claims and presence (`local`, which
+  the output takes from the first and the counts leave out). Refused,
+  with the reason and what to do: not one brain (two separate brains,
+  not copies of one), different embedders (`mnemo reembed` one copy),
+  dimensions or float-vector settings, an input older than format 9 or
+  with work a process left unfinished (`mnemo verify --recover`), an
+  output that exists or is an input. The guide says how to settle each
+  kind of conflict and how to put the merged file in place as the
+  project brain. Fixtures written by the published v0.20.2 are in
   `tests/fixtures/v0_20_2/`.
+- **`mnemo forget [PATH] <ID>`** (REV-019.1): forget one memory by its
+  ULID from the shell, as the MCP `forget` tool does, which is how to
+  settle a conflict copy you don't want. An id with no live record is
+  refused.
+- **`mnemo verify --recover`** (REV-019.2): opens the file read-write
+  once first, which finishes a write a process left pending or repairs a
+  torn header and changes no record, then verifies.
 
 ### Changed
 

@@ -103,10 +103,12 @@ fn merge_prints_what_it_did_and_json_gives_the_ids() {
         stdout.contains("conflicts: 1 fact (1 record flagged"),
         "{stdout}"
     );
+    // Nothing was removed, so no note about it (REV-019.2).
     assert!(
-        stdout.contains("still hold the records the merge removed"),
+        !stdout.contains("still hold the records the merge removed"),
         "{stdout}"
     );
+    let table = stdout;
 
     let json_out = dir.path().join("out2.mnemo");
     let o = mnemo(
@@ -130,6 +132,12 @@ fn merge_prints_what_it_did_and_json_gives_the_ids() {
     assert_eq!(r["conflict_ids"].as_array().unwrap().len(), 1);
     assert_eq!(r["removed"], serde_json::json!([]));
     assert_eq!(r["lead_ms"].as_array().unwrap().len(), 2);
+    // The table lists the flagged record by id (REV-019.1); a conflict
+    // copy has no other name.
+    let copy = r["conflict_ids"][0].as_str().unwrap();
+    assert!(table.contains(&format!("    {copy}\n")), "{table}");
+    assert_eq!(r["conflict_labels"], serde_json::json!({}));
+    assert_eq!(r["local"].as_array().unwrap().len(), 2);
 
     // `about` counts what the merge flagged, in both forms.
     let o = mnemo(&["about", s(&out)], &[("MNEMO_PASSPHRASE", PW)]);
@@ -272,4 +280,95 @@ fn the_second_copy_takes_its_own_secret() {
     );
     assert!(o.status.success(), "{}", text(&o.stderr));
     Mnemo::open_read_only(&out, PW).unwrap();
+}
+
+#[test]
+fn the_table_names_a_flagged_keys_version_by_its_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.mnemo");
+    let mut db = Mnemo::create(&base, PW, cfg()).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.remember_keyed(
+        Memory::new("the status, at first", MemoryType::Semantic, v(1.0)),
+        "status.build",
+    )
+    .unwrap();
+    db.close().unwrap();
+    let (a, b) = (dir.path().join("a.mnemo"), dir.path().join("b.mnemo"));
+    let t = 1_900_000_000_000u64;
+    for (path, text, at, x) in [
+        (&a, "a's status", t, 2.0),
+        (&b, "b's status", t + 1_000, 3.0),
+    ] {
+        std::fs::copy(&base, path).unwrap();
+        let mut db = Mnemo::open(path, PW).unwrap();
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        db.remember_keyed(
+            Memory::new(text, MemoryType::Semantic, v(x)),
+            "status.build",
+        )
+        .unwrap();
+        db.close().unwrap();
+    }
+    let out = dir.path().join("out.mnemo");
+    let o = mnemo(
+        &["merge", s(&a), s(&b), "-o", s(&out)],
+        &[("MNEMO_PASSPHRASE", PW)],
+    );
+    let stdout = text(&o.stdout);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(
+        stdout.contains("conflicts: 1 key (1 record flagged"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("  key status.build\n"), "{stdout}");
+}
+
+#[test]
+fn forget_settles_a_conflict_copy_from_the_shell() {
+    // REV-019.1: the guide's way to settle a conflict copy, in the CLI.
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b, fact) = two_copies(dir.path());
+    let out = dir.path().join("out.mnemo");
+    let o = mnemo(
+        &["merge", s(&a), s(&b), "-o", s(&out), "--format", "json"],
+        &[("MNEMO_PASSPHRASE", PW)],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let r: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let copy = r["conflict_ids"][0].as_str().unwrap().to_string();
+    let o = mnemo(&["forget", s(&out), &copy], &[("MNEMO_PASSPHRASE", PW)]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert_eq!(text(&o.stdout), format!("{copy}\tforgotten\n"));
+    let o = mnemo(&["about", s(&out)], &[("MNEMO_PASSPHRASE", PW)]);
+    assert!(
+        !text(&o.stdout).contains("flagged by a merge"),
+        "{}",
+        text(&o.stdout)
+    );
+    let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+    assert!(db.get(&Ulid::from_string(&copy).unwrap()).is_err());
+    assert!(db.get(&fact).is_ok(), "the record stays");
+    drop(db);
+    // Again: there's nothing to forget, and it says so.
+    let o = mnemo(&["forget", s(&out), &copy], &[("MNEMO_PASSPHRASE", PW)]);
+    assert!(!o.status.success());
+    assert!(text(&o.stderr).contains(&copy), "{}", text(&o.stderr));
+}
+
+#[test]
+fn verify_recover_opens_read_write_once_then_verifies() {
+    // REV-019.2: the recovery a merge's refusal of a copy with unfinished
+    // work names. On a clean file it changes nothing and verifies.
+    let dir = tempfile::tempdir().unwrap();
+    let (a, _, _) = two_copies(dir.path());
+    let before = std::fs::read(&a).unwrap().len();
+    let o = mnemo(&["verify", s(&a), "--recover"], &[("MNEMO_PASSPHRASE", PW)]);
+    let stdout = text(&o.stdout);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(stdout.contains("recovered "), "{stdout}");
+    assert!(stdout.contains("verified "), "{stdout}");
+    let mut db = Mnemo::open_read_only(&a, PW).unwrap();
+    assert_eq!(db.memories().unwrap().len(), 3, "every record still there");
+    assert_eq!(std::fs::read(&a).unwrap().len(), before, "nothing written");
 }

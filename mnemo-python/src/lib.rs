@@ -4009,7 +4009,10 @@ fn compact_file_with_key(py: Python<'_>, path: &str, key: &[u8]) -> PyResult<PyO
 /// (ids), `conflicts` (by kind), `conflict_ids`, `removed` (ids),
 /// `dropped`, `kept_keys`, `renamed`, `after_cycles`, `lead_ms` and
 /// `hlc_since` (one per input), `older_deletes` (older deletes kept as
-/// tombstones) and `settled` (conflict copies settled since, ids). Raises
+/// tombstones), `settled` (conflict copies settled since, ids),
+/// `conflict_labels` (a flagged record's key, task slug or finding id, by
+/// id) and `local` (each input's claims and presence, which the output
+/// takes from `a` and the counts leave out). Raises
 /// `InvalidArgumentError` with the reason when the merge is refused (not
 /// one brain, different embedders, a copy older than format 9, an output
 /// that exists).
@@ -4102,6 +4105,12 @@ fn merge_files(
     d.set_item("hlc_since", report.hlc_since.to_vec())?;
     d.set_item("older_deletes", report.older_deletes)?;
     d.set_item("settled", ids(&report.settled))?;
+    let labels = PyDict::new_bound(py);
+    for (u, l) in &report.conflict_labels {
+        labels.set_item(u.to_string(), l)?;
+    }
+    d.set_item("conflict_labels", labels)?;
+    d.set_item("local", report.local.to_vec())?;
     Ok(d.into_any().unbind())
 }
 

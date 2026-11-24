@@ -1144,6 +1144,14 @@ pub struct MergeReport {
     /// was edited since the merge that made them, which settles them
     /// (RB-020.3).
     pub settled: Vec<Ulid>,
+    /// What the flagged records are, where a name says more than the id
+    /// (REV-019.1): `key <key>` for a key's version, `task <slug>`,
+    /// `finding <id>`. Conflict copies and essence items have none.
+    pub conflict_labels: std::collections::BTreeMap<Ulid, String>,
+    /// Each input's claims and presence, which a merge doesn't combine: the
+    /// output keeps the first input's, and [`MergeReport::merged`] doesn't
+    /// count them (REV-019.2).
+    pub local: [usize; 2],
 }
 
 /// v0.21.0 (13.7): an input's lead past which the merge's report warns.

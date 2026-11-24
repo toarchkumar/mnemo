@@ -308,18 +308,34 @@ mnemo about merged.mnemo
 
 A delete in either copy wins. An edit made in one copy wins over the
 copy that didn't change it. Edits made in both keep the newer, and the
-merge flags the conflict: `about` counts the flagged records and
-`mnemo inspect` lists them. The output opens with the first copy's
-secret; give a copy rekeyed since its own with `--b-passphrase` or
-`--b-key-file`. Merge copies, not the brain in use: each input is held
-for readers while it's read, so a session can't write to it.
+merge flags the conflict: its report lists the first ten flagged records,
+`about` counts them and `mnemo inspect` lists them all. The output opens
+with the first copy's secret. If the second copy has a secret of its own
+(it was rekeyed since), pass it with `--b-passphrase`, `--b-key-file` or
+`MNEMO_B_PASSPHRASE`. Merge copies, not the brain in use: each input is
+held for readers while it's read, so a session can't write to it.
 
+After a merge, settle each flagged record; a write settles it at once.
 A fact edited in both copies comes out twice: the newer edit as the
-record and the other as a flagged conflict copy. To settle it, forget the
-copy you don't want (the MCP `forget` tool, with its id), or edit the
-record to say what it should: its copy then goes at the next merge, and
-the report counts it as settled. Forgetting the record instead keeps the
-copy, which then stands alone.
+record and the other as a flagged conflict copy. Forget the copy you
+don't want (`mnemo forget merged.mnemo <id>`, or the MCP `forget` tool),
+or edit the record to say what it should: its copy then goes at the next
+merge, and the report counts it as settled. Forgetting the record instead
+keeps the copy, which then stands alone. A key written in both copies is
+one chain, the newer version live and the other flagged: write the key
+again (`mnemo remember merged.mnemo --key <key> --text "<what it should
+say>"`) to settle it. An essence item, task or finding changed in both is
+flagged until you next change it.
+
+To make the merged file the project brain, close the sessions that have
+the brain open, keep the old one, and move the merged file into its
+place. Give the project brain's copy first, so the merged file opens with
+its key:
+
+```sh
+mv .git/mnemo/project.mnemo .git/mnemo/project.mnemo.before-merge
+mv merged.mnemo .git/mnemo/project.mnemo
+```
 
 Copies an older build (before v0.21) wrote to merge too, with two limits.
 A delete it made is known only while the copy still holds the deleted

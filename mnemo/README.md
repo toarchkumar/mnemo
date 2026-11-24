@@ -694,8 +694,9 @@ and KDF settings, with a new data key, like a compaction.
   two of them hold different text, and a conflict copy stays while its
   text is one of them: edit the record (from the merged file) and its
   flag goes at once, or for a fact, its copy goes at the next merge, which
-  counts it as settled. Forgetting the record instead keeps the copy beside its
-  tombstone. So copies merge to the same records in any order, a copy of a
+  counts it as settled. A write of a flagged conflict copy settles it too,
+  and `mnemo forget <id>` forgets one. Forgetting the record instead keeps
+  the copy beside its tombstone. So copies merge to the same records in any order, a copy of a
   copy too.
 - A key written in both copies becomes one chain, both versions in
   history: each version after the one it was written over, and versions
@@ -712,8 +713,10 @@ and KDF settings, with a new data key, like a compaction.
   (`_mnemo.tombstone_supersedes`), and the version a merge had put it
   after (`_mnemo.tombstone_after`). Forgetting a key's live version ends
   its chain, and a merge keeps it ended unless a version written after it
-  is kept; a version that lost to the one forgotten keeps its flag. A keyed manifest's
-  slot is one chain too. Essence items, tasks
+  is kept; a version that lost to the one forgotten keeps its flag. A new
+  version of the key settles the versions a merge flagged before it
+  (`_mnemo.merge_settled`), and no later merge flags them again. A keyed
+  manifest's slot is one chain too. Essence items, tasks
   and findings merge their status (`done`, `verified` and `resolved` are
   final); two tasks or findings under one name keep both, the later
   renamed `<name>-merge-2` and flagged until it can take its name back.
@@ -723,7 +726,9 @@ and KDF settings, with a new data key, like a compaction.
 
 `MergeReport` says what came from each side, what conflicted, what was
 deleted (and the older deletes it kept as tombstones), the conflict copies
-settled, and how far each copy's clock ran ahead. Each input is held for
+settled, what each flagged record is (`conflict_labels`: its key, task slug
+or finding id), each copy's claims and presence (`local`, which the output
+takes from the first copy), and how far each copy's clock ran ahead. Each input is held for
 readers while it's read, so merge copies, not a brain in use.
 `Mnemo::merge_conflicts` returns the records a merge flagged; `mnemo
 merge a b -o out` runs it from a shell, and `about` and `inspect` show the
@@ -1083,11 +1088,12 @@ cargo run --bin mnemo -- <command>
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …). Since v0.17 private records only with `--visibility private` (or `all`). Since v0.20.2 `--thread <ID>` (MCP `thread`) searches one thread's saved turns, a past session's (`claude-code:<session id>`), as `--filter _mnemo.thread=<ID> --filter _mnemo.kind=turn` does |
 | `stale [PATH] [--mine] [--visibility L]` | The stale records, oldest first (private ones only when asked): past their `review_by`, or older than their kind's default (essence `state` and `next` 14 days, `open` 30; an `active` task with no update 3 days, a `blocked` one 7; an unread message 3). `--mine` keeps yours (`--as`, else `MNEMO_AGENT`) (v0.17). Since v0.20.2 also the live, unkeyed episodic facts older than 30 days (`unkeyed episodic`), which nothing supersedes on its own; `about` and the session brief don't count those |
 | `supersede [PATH] <ID> --by <ID\|KEY>` | v0.20.2: mark an unkeyed memory superseded by a newer one (its ULID, or a key's live version), so recall and `about` leave it out as they leave out a keyed fact's older versions. Refuses a keyed memory (its key's next version supersedes it), an engine record (a turn, essence item, task, message or finding) and the manifest; the same again is `unchanged` |
+| `forget [PATH] <ID>` | v0.21.0: forget one memory by its ULID, as the MCP `forget` tool does: it leaves every read, a tombstone records the delete, and a merge removes it from every copy it meets. How to settle a merge's conflict copy you don't want. A thread's turns go with `thread forget`; a review finding is refused (triage it `rejected`); `compact` reclaims the space |
 | `stats [PATH] [--format table\|json\|jsonl]` | v0.20.2: what the MCP `stats` tool returns: the memory count, the file's size, the dimensions, the index, the snapshots and the page cache |
-| `verify`  | Decrypt and re-validate every live record; since v0.19.1 it also reads the ANN index and reports it on its own line (a damaged index is a warning: the memories are intact, and `mnemo index --rebuild` repairs it) |
+| `verify`  | Decrypt and re-validate every live record; since v0.19.1 it also reads the ANN index and reports it on its own line (a damaged index is a warning: the memories are intact, and `mnemo index --rebuild` repairs it). Since v0.21.0 `--recover` opens the file read-write once first, which finishes a write a process left pending (its write-ahead log) or repairs a torn header and changes no record: what a read-only open (or a merge's input) that says to open read-write once needs |
 | `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
 | `compact` | Rebuild the file, dropping deleted rows and expired records (since v0.21.0 it keeps the tombstone record each delete leaves, so a delete no longer makes the file smaller); writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again. Since v0.15 it also rebuilds the keyword index with tokenizer 2 |
-| `merge <A> <B> -o <OUT>` | v0.21.0: merge two diverged copies of one brain into a new file, leaving both as they were (`Mnemo::merge_files`; the rules are under "Merging two copies"). The output opens with the first copy's secret (`--passphrase`, `--key-file`, or the key store); the second copy takes its own with `--b-passphrase`, `--b-key-file` or `MNEMO_B_PASSPHRASE`, else the key store's entry for its salt, else the first copy's; when that doesn't open it, `merge` asks at a terminal, and the error names the copy. Prints what came from each copy, the conflicts by kind, the removals, keys deleted in one copy and written in the other, renamed tasks and findings, and `after` cycles; `--format json` adds the ids. A copy's clock more than an hour ahead is a warning on stderr. Refused, with the reason and exit 1, when the copies aren't one brain, their embedders differ, a copy is older than format 9, or the output exists. Merge copies, not the brain in use: each input is held for readers while it's read |
+| `merge <A> <B> -o <OUT>` | v0.21.0: merge two diverged copies of one brain into a new file, leaving both as they were (`Mnemo::merge_files`; the rules are under "Merging two copies"). The output opens with the first copy's secret (`--passphrase`, `--key-file`, or the key store); the second copy takes its own with `--b-passphrase`, `--b-key-file` or `MNEMO_B_PASSPHRASE`, else the key store's entry for its salt, else the first copy's; when that doesn't open it, `merge` asks at a terminal, and the error names the copy. Prints what came from each copy, the conflicts by kind with the first ten flagged records (each with its key, task slug or finding id), the removals, keys deleted in one copy and written in the other, renamed tasks and findings, and `after` cycles; `--format json` adds the ids. A copy's clock more than an hour ahead is a warning on stderr. Refused, with the reason and exit 1, when the copies aren't one brain, their embedders differ, a copy is older than format 9, or the output exists. Merge copies, not the brain in use: each input is held for readers while it's read |
 | `reembed` | Embed every live memory again with a new embedder (`--embed-cmd`, `--embed-name`, `--embed-query`, `--embed-dims`; without `--embed-cmd`, the built-in) and record its identity: a compaction with new vectors, so an interrupted run leaves the file as it was (v0.15) |
 | `embedder install` | Fetch the built-in embedder's model (91.0 MB) into the cache directory, checking each file's SHA-256; prints the size first (v0.15) |
 | `embedder status` | The built-in embedder's model, identity and cache, and whether it's installed (v0.15) |

@@ -82,6 +82,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Inbox { path, .. }
         | Command::Stale { path, .. }
         | Command::Supersede { path, .. }
+        | Command::Forget { path, .. }
         | Command::Stats { path, .. }
         | Command::Ack { path, .. }
         | Command::Post { brain: path, .. }
@@ -156,6 +157,7 @@ fn shift_get_args(cmd: &mut Command) -> std::result::Result<(), String> {
         Command::Update { path, id, .. } => ("update", path, id, true),
         Command::Ack { path, id, .. } => ("ack", path, id, true),
         Command::Supersede { path, id, .. } => ("supersede", path, id, true),
+        Command::Forget { path, id, .. } => ("forget", path, id, true),
         Command::Essence {
             cmd:
                 EssenceCmd::Update { path, id, .. }
@@ -469,6 +471,13 @@ enum Command {
         key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
+        /// v0.21.0 (REV-019.2): open the file read-write once first, which
+        /// finishes a write a process left pending (its write-ahead log) or
+        /// repairs a torn header, and changes no record; then verify. Use it
+        /// when a read-only open says to open read-write once to fix, as a
+        /// merge's refusal of an input copy does.
+        #[arg(long)]
+        recover: bool,
     },
     /// Import memories from a JSON Lines file.
     ///
@@ -787,6 +796,25 @@ enum Command {
         /// whose live version in the default agent's slot is used.
         #[arg(long, value_name = "ID|KEY")]
         by: String,
+        #[command(flatten)]
+        who: AsArgs,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// v0.21.0 (REV-019.1): forget one memory by its ULID, as the MCP
+    /// `forget` tool does: it leaves every read, a tombstone records the
+    /// delete, and a merge removes it from every copy it meets. This is how
+    /// to settle a merge's conflict copy you don't want. A thread's turns
+    /// go with `thread forget`; a review finding is refused (triage it
+    /// `rejected`). `compact` reclaims the space.
+    Forget {
+        /// Path to the `.mnemo` file, then the memory's ULID. With one
+        /// argument it's the ULID, and the brain is this project's.
+        #[arg(value_name = "PATH")]
+        path: String,
+        /// The memory's ULID (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
         #[command(flatten)]
         who: AsArgs,
         #[arg(long)]
@@ -2635,6 +2663,12 @@ fn print_merge_report(
             "hlc_since": r.hlc_since,
             "older_deletes": r.older_deletes,
             "settled": ids(&r.settled),
+            "conflict_labels": r
+                .conflict_labels
+                .iter()
+                .map(|(u, l)| (u.to_string(), serde_json::Value::String(l.clone())))
+                .collect::<serde_json::Map<_, _>>(),
+            "local": r.local,
         });
         println!(
             "{}",
@@ -2663,6 +2697,20 @@ fn print_merge_report(
             by_kind.join(", "),
             if n == 1 { "" } else { "s" }
         );
+        // REV-019.1: the first ten, by id, with a key, slug or finding id
+        // where there is one.
+        for u in r.conflict_ids.iter().take(MERGE_TABLE_IDS) {
+            match r.conflict_labels.get(u) {
+                Some(l) => println!("    {u}  {l}"),
+                None => println!("    {u}"),
+            }
+        }
+        if n > MERGE_TABLE_IDS {
+            println!(
+                "    and {} more (`--format json` lists them all)",
+                n - MERGE_TABLE_IDS
+            );
+        }
     }
     println!("  removed, deleted in a copy: {}", r.removed.len());
     if !r.settled.is_empty() {
@@ -2679,7 +2727,17 @@ fn print_merge_report(
         );
     }
     if r.dropped > 0 {
-        println!("  left out, as compaction leaves them out: {}", r.dropped);
+        println!(
+            "  left out, expired (or messages acked over 30 days ago): {}",
+            r.dropped
+        );
+    }
+    if r.local[0] > 0 {
+        println!(
+            "  plus {}'s claims and presence: {} (not merged: the output keeps the first \
+             copy's, and the counts above leave them out)",
+            a, r.local[0]
+        );
     }
     for k in &r.kept_keys {
         let owner = k
@@ -2721,8 +2779,13 @@ fn print_merge_report(
          write: {})",
         since.join(", ")
     );
-    println!("note: {a} and {b} still hold the records the merge removed");
+    if !r.removed.is_empty() {
+        println!("note: {a} and {b} still hold the records the merge removed");
+    }
 }
+
+/// REV-019.1: how many flagged records the merge table lists by id.
+const MERGE_TABLE_IDS: usize = 10;
 
 /// A read-write open with either secret (waiting, as [`open_w`]).
 fn open_rw(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mnemo> {
@@ -4021,8 +4084,15 @@ fn run() -> std::result::Result<(), String> {
             path,
             key_file,
             passphrase: pp,
+            recover,
         } => {
             let secret = secret_for(&path, &pp, &key_file)?;
+            if recover {
+                open_rw(&path, &secret, "verify --recover")
+                    .and_then(|db| db.close())
+                    .map_err(fmt)?;
+                println!("recovered {path}: a read-write open finished its pending work");
+            }
             let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let report = db.verify_report().map_err(fmt)?;
             println!(
@@ -5135,6 +5205,28 @@ fn run() -> std::result::Result<(), String> {
                 _ => "superseded",
             };
             println!("{old}\t{s}\tby {by}");
+        }
+        Command::Forget {
+            path,
+            id,
+            who,
+            passphrase: pp,
+        } => {
+            let (agent, role) = who.resolve()?;
+            let id = parse_ulid(id.as_deref().unwrap_or_default())?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "forget").map_err(fmt)?;
+            note_mistagged(&mut db);
+            if agent.is_some() {
+                db.set_author(agent.clone());
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
+            }
+            // A record already forgotten (or never there) is no forget: say so.
+            db.get(&id)
+                .map_err(|_| format!("no live memory {id} to forget"))?;
+            db.delete(&id).map_err(fmt)?;
+            db.flush_noting()?;
+            println!("{id}\tforgotten");
         }
         Command::Stats {
             path,
