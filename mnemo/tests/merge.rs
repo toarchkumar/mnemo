@@ -2842,6 +2842,36 @@ fn flagged_in(db: &mut Mnemo, id: &Ulid) -> bool {
 }
 
 #[test]
+fn a_keyed_writes_created_at_is_its_ids_second() {
+    // A merge takes a deleted version's creation from its id, and a key's
+    // `_mnemo.invalid_at` is the next version's creation: the two must
+    // name the same second, or merging a file with itself moves it by one
+    // across a second boundary. A keyed write keeps the id `Memory::new`
+    // made with its `created_at`, and one that reuses an id takes a new id
+    // and a `created_at` from the same clock read.
+    let p = pair();
+    let mut db = open(&p.a);
+    for i in 0..20 {
+        let (id, _) = db
+            .remember_keyed(
+                Memory::new(format!("k is {i}"), MemoryType::Semantic, v(i as f32 + 1.0)),
+                "k",
+            )
+            .unwrap();
+        let m = db.get(&id).unwrap();
+        assert_eq!(m.created_at, (id.timestamp_ms() / 1000) as i64);
+    }
+    let existing = db.get(&p.base_fact).unwrap();
+    let mut reused = Memory::new("k is reused", MemoryType::Semantic, v(30.0));
+    reused.id = existing.id;
+    let (id, _) = db.remember_keyed(reused, "k").unwrap();
+    assert_ne!(id, existing.id, "a keyed write is a new record");
+    let m = db.get(&id).unwrap();
+    assert_eq!(m.created_at, (id.timestamp_ms() / 1000) as i64);
+    assert_eq!(db.get(&p.base_fact).unwrap().content, existing.content);
+}
+
+#[test]
 fn a_settled_version_stays_settled_when_the_version_it_lost_to_is_forgotten() {
     // REV-019.1 with RB-020.4: a's version lost to b's in a merge and was
     // flagged; a write of a's version settles it, and b's version is then

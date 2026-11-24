@@ -234,8 +234,8 @@ impl Mnemo {
             // version stops being valid when the new one was created: one
             // clock read, so a merge recomputing it from the chain (its next
             // version's created_at) agrees with what the write stamped.
+            self.fresh_id(&mut memory);
             let now = memory.created_at;
-            memory.id = Ulid::nil(); // force a fresh ULID in `put`
             memory.metadata.insert(
                 MNEMO_META_SUPERSEDES.into(),
                 Value::String(Ulid(prev_id_u).to_string()),
@@ -265,7 +265,7 @@ impl Mnemo {
         }
 
         // ADDED: no prior record for this slot.
-        memory.id = Ulid::nil();
+        self.fresh_id(&mut memory);
         let new_id = self.put(memory)?;
         if let Some(k) = self.key_index.as_mut() {
             k.insert(slot, new_id.0);
@@ -376,8 +376,8 @@ impl Mnemo {
             return Ok((*supersedes, WriteOutcome::Updated));
         }
         // The new version's created_at, as in the plain keyed write.
+        self.fresh_id(&mut memory);
         let now = memory.created_at;
-        memory.id = Ulid::nil();
         memory.metadata.insert(
             MNEMO_META_SUPERSEDES.into(),
             Value::String(supersedes.to_string()),
@@ -697,6 +697,23 @@ impl Mnemo {
     }
 
     // --- Phase 12.7a: thread archive --------------------------------
+}
+
+impl Mnemo {
+    /// A keyed write is always a new record: it keeps the memory's own id
+    /// (made with its `created_at`, in one clock read, by
+    /// [`Memory::new`]) unless the file already has a record with that id,
+    /// and then takes a new one, with `created_at` from the same clock
+    /// read. A merge reads a deleted version's creation from its id, so the
+    /// two must name the same second.
+    fn fresh_id(&self, memory: &mut Memory) {
+        if memory.id == Ulid::nil() || self.index.get(memory.id.0, &self.catalog).is_some() {
+            memory.id = Ulid::new();
+            let s = (memory.id.timestamp_ms() / 1000) as i64;
+            memory.created_at = s;
+            memory.accessed_at = s;
+        }
+    }
 }
 
 /// REV-019.1: how far back a new version of a key looks for versions a

@@ -149,7 +149,9 @@ aren't published in this release: they stay at 0.20.0.
   later write of the key came after (decision.v0210-5f-older-builds).
   A new record's `created_at` and its id's time now come from one clock
   read, so they name the same second (a merge reads a deleted version's
-  creation from its id; across a second boundary the two could differ).
+  creation from its id; across a second boundary the two could differ),
+  and a keyed write keeps that id instead of taking a new one (unless the
+  file already has a record with it).
   This build's first edit of a record an older build wrote lists that
   version among the ones before it, and gives it a first stamp from when
   it was created, so an edit in one copy wins with no conflict copy
