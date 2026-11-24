@@ -1,0 +1,22 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "mnemo",
+  "displayName": "MNemo",
+  "version": "0.21.0",
+  "description": "This project's memory: the mnemo MCP server on one encrypted file in your repository, and a skill on when to recall and remember",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "Arch Kumar",
+    "url": "https://github.com/toarchkumar"
+  },
+  "homepage": "https://toarchkumar.github.io/mnemo/",
+  "repository": "https://github.com/toarchkumar/mnemo",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "agent-memory",
+    "mcp",
+    "encryption",
+    "coding-agents"
+  ]
+}

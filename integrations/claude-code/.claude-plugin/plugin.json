@@ -1,7 +1,29 @@
 {
   "name": "mnemo",
+  "displayName": "MNemo",
+  "version": "0.21.0",
   "description": "This project's memory: the mnemo MCP server, hooks that load and save it, and a skill on when to recall and remember",
+  "author": {
+    "name": "Arch Kumar",
+    "url": "https://github.com/toarchkumar"
+  },
   "homepage": "https://toarchkumar.github.io/mnemo/",
   "repository": "https://github.com/toarchkumar/mnemo",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "agent-memory",
+    "mcp",
+    "encryption",
+    "coding-agents"
+  ],
+  "documentationUrl": "https://github.com/toarchkumar/mnemo/blob/main/integrations/claude-code/README.md",
+  "supportUrl": "https://github.com/toarchkumar/mnemo/issues",
+  "privacyPolicyUrl": "https://github.com/toarchkumar/mnemo/blob/main/integrations/claude-code/README.md#privacy",
+  "icon": ".claude-plugin/icon.png",
+  "network": {
+    "hosts": [
+      "huggingface.co"
+    ]
+  }
 }
