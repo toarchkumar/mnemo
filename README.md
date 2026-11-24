@@ -182,7 +182,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.20.2", "semantic", key="current-release")
+    db.remember_text("the current release is v0.21.0", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -203,6 +203,31 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.21.0: merge two copies of a brain
+
+- **`mnemo merge` combines two copies that both changed.** Copy a brain to
+  a laptop, work in both, then `mnemo merge laptop.mnemo desktop.mnemo -o
+  merged.mnemo`. It writes a new file and leaves both copies as they were.
+  Every memory, thread, essence item, task and finding from either copy is
+  kept. A delete in one copy wins, and so does an edit that the other copy
+  didn't touch.
+- **Edits made in both copies are kept and flagged, not lost.** The newer
+  edit becomes the record, and the other stays as a flagged copy in its
+  history. The merge's report lists the first ten, `mnemo about` counts
+  them, and `mnemo inspect` lists them all.
+- **Settle a conflict with one write.** Forget the copy you don't want
+  (`mnemo forget <id>`, new in the CLI, or the MCP `forget` tool), or write
+  the record or key again: its flag goes at once. The guide's "Merge two
+  copies" section has the steps, and how to put the merged file in place
+  as your project brain.
+- **The merge gives the same file in any order.** Merging a with b equals
+  b with a, merging the result again changes nothing, and three or four
+  copies merge alike in any grouping. Random tests check this, with clocks
+  that run ahead and behind, and with copies that v0.20.2 wrote to. A few
+  narrow cases with v0.20.2's writes are listed in the CHANGELOG.
+- There's no format change: v0.20.2 opens a merged file. The Swift and
+  Android libraries stay at 0.20.0.
 
 ## What's new in v0.20.2: the features agents reach for
 
