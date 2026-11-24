@@ -2735,7 +2735,7 @@ fn print_merge_report(
     if r.local[0] > 0 {
         println!(
             "  plus {}'s claims and presence: {} (not merged: the output keeps the first \
-             copy's, and the counts above leave them out)",
+             copy's; the merged count leaves them out)",
             a, r.local[0]
         );
     }
@@ -4470,12 +4470,20 @@ fn run() -> std::result::Result<(), String> {
                 }
                 OutputFormat::Table => {
                     // One-line stats header — what kind of file you're looking at.
+                    // v0210-6b: a count of one takes the singular.
+                    let n = |c: usize, one: &str, many: &str| {
+                        format!("{c} {}", if c == 1 { one } else { many })
+                    };
                     println!(
-                        "# {}  ({} memories: {} facts, {} turns, {} essence, {} coordination · {}-dim · {} · {} snapshots{})",
+                        "# {}  ({}: {}, {}, {} essence, {} coordination · {}-dim · {} · {}{})",
                         path,
-                        stats.memories.saturating_sub(counts.tombstones),
-                        counts.facts,
-                        counts.turns,
+                        n(
+                            stats.memories.saturating_sub(counts.tombstones),
+                            "memory",
+                            "memories"
+                        ),
+                        n(counts.facts, "fact", "facts"),
+                        n(counts.turns, "turn", "turns"),
                         counts.essence,
                         counts.coordination,
                         stats.dimensions,
@@ -4484,7 +4492,7 @@ fn run() -> std::result::Result<(), String> {
                         } else {
                             "plaintext"
                         },
-                        snapshots,
+                        n(snapshots, "snapshot", "snapshots"),
                         if stats.index.is_some() {
                             " · ANN index built"
                         } else {

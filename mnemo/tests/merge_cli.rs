@@ -283,6 +283,76 @@ fn the_second_copy_takes_its_own_secret() {
 }
 
 #[test]
+fn the_claims_line_says_only_the_merged_count_leaves_them_out() {
+    // v0210-6b: `in both` counts the claims and presence the copies share,
+    // so the line says the merged count leaves them out, not the counts
+    // above. And `about` says "1 snapshot" for the output's one.
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.mnemo");
+    let mut db = Mnemo::create(&base, PW, cfg()).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.close().unwrap();
+    let o = mnemo(
+        &[
+            "claim",
+            "take",
+            "the release",
+            "--ttl",
+            "1h",
+            "--brain",
+            s(&base),
+            "--as",
+            "worker-a",
+        ],
+        &[("MNEMO_PASSPHRASE", PW)],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let (a, b) = (dir.path().join("a.mnemo"), dir.path().join("b.mnemo"));
+    for (path, x) in [(&a, 2.0), (&b, 3.0)] {
+        std::fs::copy(&base, path).unwrap();
+        let mut db = Mnemo::open(path, PW).unwrap();
+        db.remember(Memory::new("a fact", MemoryType::Semantic, v(x)))
+            .unwrap();
+        db.close().unwrap();
+    }
+    let out = dir.path().join("out.mnemo");
+    let o = mnemo(
+        &["merge", s(&a), s(&b), "-o", s(&out), "--format", "json"],
+        &[("MNEMO_PASSPHRASE", PW)],
+    );
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let r: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let local = r["local"][0].as_u64().unwrap();
+    assert!(local >= 1, "{r}");
+    std::fs::remove_file(&out).unwrap();
+    let o = mnemo(
+        &["merge", s(&a), s(&b), "-o", s(&out)],
+        &[("MNEMO_PASSPHRASE", PW)],
+    );
+    let stdout = text(&o.stdout);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    // The shared manifest and the claims are in both; the merged count
+    // leaves the claims out.
+    let both = r["both"].as_u64().unwrap();
+    let merged = r["merged"].as_u64().unwrap();
+    assert_eq!(merged, both - local + 2, "{r}");
+    assert!(
+        stdout.contains(&format!(
+            "  plus {}'s claims and presence: {local} (not merged: the output keeps the \
+             first copy's; the merged count leaves them out)\n",
+            s(&a)
+        )),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("counts above"), "{stdout}");
+    let o = mnemo(&["about", s(&out)], &[("MNEMO_PASSPHRASE", PW)]);
+    let about = text(&o.stdout);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(about.contains(" · 1 snapshot)"), "{about}");
+    assert!(about.contains(", 0 turns, "), "{about}");
+}
+
+#[test]
 fn the_table_names_a_flagged_keys_version_by_its_key() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("base.mnemo");
