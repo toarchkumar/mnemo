@@ -1,6 +1,6 @@
 # mnemo export
 
-The brain's backup, written by mnemo 0.20.2 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
+The brain's backup, written by mnemo 0.21.0 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
 
 Keyed memories by key, then tasks, findings and the project essence, then the rest by id. Left out: vectors, thread turns, thread essence, messages, claims, presence, private records, access stats, and security findings until they're verified against a release.
 
@@ -382,6 +382,90 @@ R-006.1 (REVIEWER-A, accepted modified by PLANNER-A 2026-11-11): Phase 13 splits
 2026-11-15 (RB-012.6 item 4, closing SEEN-PER-AGENT): messages to a role or all, and a role's ready tasks, are new on each agent's per-turn line until that agent was shown them (_mnemo.seen_by); direct messages keep the delivery field; NewWork carries its agent and mark_shown records it; wake() skips a task the agent has seen.
 ```
 
+## 01M806GSBF9QX6MSH8JBHMFK8E
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.brain-backup`
+- scope: private
+- created: 2026-11-21T23:19:31Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795303323,"_mnemo.key":"decision.brain-backup","_mnemo.superseded_by":"01M806NDW9ZMA0CC1JQVG1WN60"}`
+
+```text
+Decision (user, 2026-11-21): the project brain's off-machine backup goes to a Google Drive folder the user made, named mnemo-backup (its link is never written in a public file or a fact that docs/brain.md exports). It replaces committing docs/brain.md at each release, which keeps the roadmap and decisions public, and a private repo, which can't hold a 58 MB encrypted file that git can't shrink. Only the encrypted brain goes there: never the repo, the live brain, SECURITY.local.md (plaintext) or the recovery code, which the user keeps apart, in a password manager (mnemo recovery-code, run by the user). Plan: (1) the user sets the folder to Restricted and installs Google Drive for desktop, so the folder is a local path; (2) the Worker builds mnemo backup <out> (G13 in status.dogfood-gaps), a consistent copy under the read lock, for v0.21.1, the user's call; (3) until then a copy is made only with every session stopped, then checked with mnemo verify; (4) the release checklist's backup step and the AGENTS.md protocol text change with the repo cleanup after v0.21.0, with the user's approval. mnemo-cloud stays for the paid code only.
+```
+
+## 01M806NDW9ZMA0CC1JQVG1WN60
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.brain-backup`
+- scope: private
+- created: 2026-11-21T23:22:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795303388,"_mnemo.key":"decision.brain-backup","_mnemo.superseded_by":"01M806QDN1NX72KFEG8M8NCTBD","_mnemo.supersedes":"01M806GSBF9QX6MSH8JBHMFK8E"}`
+
+```text
+Decision (user, 2026-11-21, revised the same day from Google Drive to iCloud): the project brain's off-machine backup goes to ~/Documents/mnemo-backup, which iCloud Drive syncs (the Mac's Desktop and Documents sync is on; the repo folder's .nosync suffix keeps the repo itself out, and the backup folder must not have one). Created by planner-a, owner-only (700). It replaces committing docs/brain.md at each release, which keeps the roadmap and decisions public, and a private repo, which can't hold a 58 MB encrypted file that git can't shrink. iCloud Drive keeps no old versions of a replaced file, so keep dated copies (mnemo-YYYY-MM-DD.mnemo), the last three. Only the encrypted brain goes there: never the repo, the live brain, SECURITY.local.md (plaintext) or the recovery code, which the user keeps apart, in a password manager (mnemo recovery-code, run by the user). Plan: (1) the Worker builds mnemo backup <dir> (G13 in status.dogfood-gaps), a consistent copy through the engine's shared lock, never a hand-rolled lock or a plain cp, for v0.21.1, the user's call; (2) until then a copy is made only with every session stopped, then checked with mnemo verify; (3) the release checklist's backup step and the AGENTS.md protocol text change with the repo cleanup after v0.21.0, with the user's approval. The user's Google Drive folder mnemo-backup is not used. mnemo-cloud stays for the paid code only.
+```
+
+## 01M806QDN1NX72KFEG8M8NCTBD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.brain-backup`
+- scope: private
+- created: 2026-11-21T23:23:08Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795306747,"_mnemo.key":"decision.brain-backup","_mnemo.superseded_by":"01M809XXRAEMY57A72271ZF87R","_mnemo.supersedes":"01M806NDW9ZMA0CC1JQVG1WN60"}`
+
+```text
+Decision (user, 2026-11-21, revised the same day from Google Drive to iCloud): the project brain's off-machine backup goes to ~/Documents/mnemo-backup, which iCloud Drive syncs (the Mac's Desktop and Documents sync is on; the repo folder's .nosync suffix keeps the repo itself out, and the backup folder must not have one). Created by planner-a, owner-only (700). It replaces committing docs/brain.md at each release, which keeps the roadmap and decisions public, and a private repo, which can't hold a 58 MB encrypted file that git can't shrink. iCloud Drive keeps no old versions of a replaced file, so keep dated copies (mnemo-YYYY-MM-DD.mnemo), the last three. Only the encrypted brain goes there: never the repo, the live brain, SECURITY.local.md (plaintext) or the recovery code, which the user keeps apart, in a password manager (mnemo recovery-code, run by the user). Plan: (1) the Worker builds mnemo backup <dir> (G13 in status.dogfood-gaps), a consistent copy through the engine's shared lock, never a hand-rolled lock or a plain cp, for v0.21.1, the user's call; (2) until then a copy is made only with every session stopped, then checked with mnemo verify; (3) the release checklist's backup step and the AGENTS.md protocol text change with the repo cleanup after v0.21.0, with the user's approval. The user's Google Drive folder mnemo-backup is not used. mnemo-cloud stays for the paid code only. The key (checked 2026-11-21): the brain's key is in the Mac's login keychain (keys/os_store.rs, apple_native_keyring_store::keychain), which doesn't sync to iCloud Keychain, so it's on this Mac only. Its backup is the recovery code, which the user runs mnemo recovery-code to see and saves in Apple's Passwords app (end-to-end encrypted, unlike iCloud Drive without Advanced Data Protection), optionally also on paper; on a new Mac, mnemo unlock takes it. The Planner never sees or handles it. A rekey changes the secret, so the user saves the new code then, labelled with the date, and keeps the old one while any older backup needs it.
+```
+
+## 01M809XXRAEMY57A72271ZF87R
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.brain-backup`
+- scope: private
+- created: 2026-11-22T00:19:07Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.brain-backup","_mnemo.supersedes":"01M806QDN1NX72KFEG8M8NCTBD"}`
+
+```text
+Decision (user, 2026-11-21, revised the same day from Google Drive to iCloud): the project brain's off-machine backup goes to ~/Documents/mnemo-backup, which iCloud Drive syncs (the Mac's Desktop and Documents sync is on; the repo folder's .nosync suffix keeps the repo itself out, and the backup folder must not have one). Created by planner-a, owner-only (700). It replaces committing docs/brain.md at each release, which keeps the roadmap and decisions public, and a private repo, which can't hold a 58 MB encrypted file that git can't shrink. iCloud Drive keeps no old versions of a replaced file, so keep dated copies (mnemo-YYYY-MM-DD.mnemo), the last three. Only the encrypted brain goes there: never the repo, the live brain, SECURITY.local.md (plaintext) or the recovery code, which the user keeps apart, in a password manager (mnemo recovery-code, run by the user). Plan: (1) the Worker builds mnemo backup <dir> (G13 in status.dogfood-gaps), a consistent copy through the engine's shared lock, never a hand-rolled lock or a plain cp, in v0.21.1 (user, 2026-11-21, 'Yes'), beside the plugin listing (decision.plugin-directory); (2) until then a copy is made only with every session stopped, then checked with mnemo verify; (3) the release checklist's backup step and the AGENTS.md protocol text change with the repo cleanup after v0.21.0, with the user's approval. The user's Google Drive folder mnemo-backup is not used. mnemo-cloud stays for the paid code only. The key (checked 2026-11-21): the brain's key is in the Mac's login keychain (keys/os_store.rs, apple_native_keyring_store::keychain), which doesn't sync to iCloud Keychain, so it's on this Mac only. Its backup is the recovery code, which the user runs mnemo recovery-code to see and saves in Apple's Passwords app (end-to-end encrypted, unlike iCloud Drive without Advanced Data Protection), optionally also on paper; on a new Mac, mnemo unlock takes it. The Planner never sees or handles it. A rekey changes the secret, so the user saves the new code then, labelled with the date, and keeps the old one while any older backup needs it.
+```
+
+## 01M7YJ0S2PPGC9Y3S4ZYTPYMAW
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.brain-boundaries`
+- scope: private
+- created: 2026-11-21T08:02:00Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795248312,"_mnemo.key":"decision.brain-boundaries","_mnemo.superseded_by":"01M7YJ6MA21N78VK6YZQ118ZVV"}`
+
+```text
+decision.brain-boundaries (user 'Aligned', 2026-11-21, REV-016.1): one .mnemo file is one trust boundary: files separate trust, sharing, sync and lifecycle; a multi-project file is not built (visibility is a filter, not encryption; recall quality, the single writer lock and .git discovery would all suffer). Namespaces (_mnemo.namespace) may later organize goals inside one owner's brain only: recorded in docs/ideas.md, not on the roadmap. Reading across brains is attached brains, roadmap step 4b (decision.roadmap-order); its user-facing name is being confirmed (REV-016 calls it Multi-Brain Attach, with BrainSet as the internal type).
+```
+
+## 01M7YJ6MA21N78VK6YZQ118ZVV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.brain-boundaries`
+- scope: private
+- created: 2026-11-21T08:05:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.brain-boundaries","_mnemo.supersedes":"01M7YJ0S2PPGC9Y3S4ZYTPYMAW"}`
+
+```text
+decision.brain-boundaries (user 'Aligned', 2026-11-21, REV-016.1): one .mnemo file is one trust boundary: files separate trust, sharing, sync and lifecycle; a multi-project file is not built (visibility is a filter, not encryption; recall quality, the single writer lock and .git discovery would all suffer). Namespaces (_mnemo.namespace) may later organize goals inside one owner's brain only: recorded in docs/ideas.md, not on the roadmap. Reading across brains is attached brains, roadmap step 4b (decision.roadmap-order); its user-facing name is attached brains, with --attach as the setting (user, 2026-11-21); BrainSet stays the internal type name, and REV-016 calls it Multi-Brain Attach.
+```
+
 ## 01M7VCJPBQVCX95SR0ACEHK35R
 
 - type: episodic
@@ -550,6 +634,62 @@ decision.dogfood (user, 2026-11-19): "Be always vigilant to dogfood, we need to 
 Decision (2026-11-17): INSPECT-COORD gives humans a place to monitor coordination: Findings and Tasks tabs in `mnemo inspect`, served by GET-only /api/findings and /api/tasks; brain text goes into text nodes only; tasks keep `task list` order. Shipped in v0.18.1 (PR 130, 4c696f0).
 ```
 
+## 01M80YPS5HZ79WA2794M8R9MFF
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.inspect-refresh`
+- scope: private
+- created: 2026-11-22T06:22:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795329488,"_mnemo.key":"decision.inspect-refresh","_mnemo.superseded_by":"01M80ZKXCRHERY741DBA2QXHNQ"}`
+
+```text
+Decision (user, 2026-11-21: 'The mnemo inspect web interface is something we need to refresh and bring it up to code with our brand guideline and we need to also allow for it to be a place to oversee the BrainSet once it's built'). Checked in code (v0.20.2): mnemo/src/bin/mnemo/inspect.html (474 lines) uses its own palette (accent #2f5fd0 blue, --fg, --panel, --tag, --warn), not docs/brand.md's tokens (decision.brand names inspect among the surfaces that must follow them); it has no mark or wordmark (title 'mnemo inspect', h1 at weight 600), 6px radii, and no data-theme switch; tabs Memories, Keyed history, Threads, Findings, Tasks, Snapshots, About. Two parts. (1) Brand refresh: the brand's light and dark tokens, the mark and wordmark, its type and radii, a theme toggle; the layout gets an overview first (what the brain holds by kind, the open tasks, findings and unread messages, the size breakdown that G14 found by hand) and a brain column or switcher that shows one brain now. The rules stay: GET-only, read once and close, brain text in text nodes only, no new endpoint that writes. (2) Attached brains (BrainSet, roadmap step 4b): inspect opens the session's set, each brain read-only with its own key, shows which brains are attached, filters every view by brain, and labels each record and recall hit with its brain; designed into 4b's spec, not built before. Placement of (1) is the user's call (asked 2026-11-21).
+```
+
+## 01M80ZKXCRHERY741DBA2QXHNQ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.inspect-refresh`
+- scope: private
+- created: 2026-11-22T06:38:08Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795329775,"_mnemo.key":"decision.inspect-refresh","_mnemo.superseded_by":"01M80ZWP25CQRWN6WCTBEFFDTA","_mnemo.supersedes":"01M80YPS5HZ79WA2794M8R9MFF"}`
+
+```text
+Decision (user, 2026-11-21: 'The mnemo inspect web interface is something we need to refresh and bring it up to code with our brand guideline and we need to also allow for it to be a place to oversee the BrainSet once it's built'). Checked in code (v0.20.2): mnemo/src/bin/mnemo/inspect.html (474 lines) uses its own palette (accent #2f5fd0 blue, --fg, --panel, --tag, --warn), not docs/brand.md's tokens (decision.brand names inspect among the surfaces that must follow them); it has no mark or wordmark (title 'mnemo inspect', h1 at weight 600), 6px radii, and no data-theme switch; tabs Memories, Keyed history, Threads, Findings, Tasks, Snapshots, About. Two parts. (1) Brand refresh: the brand's light and dark tokens, the mark and wordmark, its type and radii, a theme toggle; the layout gets an overview first (what the brain holds by kind, the open tasks, findings and unread messages, the size breakdown that G14 found by hand) and a brain column or switcher that shows one brain now. The rules stay: GET-only, read once and close, brain text in text nodes only, no new endpoint that writes. (2) Attached brains (BrainSet, roadmap step 4b): inspect opens the session's set, each brain read-only with its own key, shows which brains are attached, filters every view by brain, and labels each record and recall hit with its brain; designed into 4b's spec, not built before. Placement (user, 2026-11-21): (1) is v0.21.2, its own patch after v0.21.1; a mockup first, approved by the user before the Worker builds it.
+```
+
+## 01M80ZWP25CQRWN6WCTBEFFDTA
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.inspect-refresh`
+- scope: private
+- created: 2026-11-22T06:42:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.inspect-refresh","_mnemo.supersedes":"01M80ZKXCRHERY741DBA2QXHNQ"}`
+
+```text
+Decision (user, 2026-11-21: 'The mnemo inspect web interface is something we need to refresh and bring it up to code with our brand guideline and we need to also allow for it to be a place to oversee the BrainSet once it's built'). Checked in code (v0.20.2): mnemo/src/bin/mnemo/inspect.html (474 lines) uses its own palette (accent #2f5fd0 blue, --fg, --panel, --tag, --warn), not docs/brand.md's tokens (decision.brand names inspect among the surfaces that must follow them); it has no mark or wordmark (title 'mnemo inspect', h1 at weight 600), 6px radii, and no data-theme switch; tabs Memories, Keyed history, Threads, Findings, Tasks, Snapshots, About. Two parts. (1) Brand refresh: the brand's light and dark tokens, the mark and wordmark, its type and radii, a theme toggle; the layout gets an overview first (what the brain holds by kind, the open tasks, findings and unread messages, the size breakdown that G14 found by hand) and a brain column or switcher that shows one brain now. The rules stay: GET-only, read once and close, brain text in text nodes only, no new endpoint that writes. (2) Attached brains (BrainSet, roadmap step 4b): inspect opens the session's set, each brain read-only with its own key, shows which brains are attached, filters every view by brain, and labels each record and recall hit with its brain; designed into 4b's spec, not built before. Placement (user, 2026-11-21): (1) is v0.21.2, its own patch after v0.21.1; a mockup first, approved by the user before the Worker builds it. The user approved the mockup (2026-11-21, 'Approve'): its files are docs/design/inspect-refresh/ (hand-off handoff-inspect-mockup); the build spec is spec.v0212-inspect.
+```
+
+## 01M85ZD6GVABVBNTX83M8A6RNR
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.merge-no-rush`
+- scope: private
+- created: 2026-11-24T05:10:40Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.merge-no-rush"}`
+
+```text
+User decision 2026-11-23: don't rush mnemo merge; it's key to coordination and shared memory. Keep the full testing for merge and for sync change sets (2,048-case proptests and mutation runs on each fix round, the dry runs, the reviews). The speed-ups the Planner floated (long runs only at READY, best effort for older builds, splitting the release) are not adopted for merge. The hop cap still applies: after three fix rounds the Planner asks the user rather than shipping with a known limit.
+```
+
 ## 01M7XEW3KYK1R631W8YKV55YYA
 
 - type: episodic
@@ -657,6 +797,34 @@ Every number in the report from a run; note the machine load as in step 1.
 2026-11-15, the user: 'go' for Phase 13a, released as v0.17.0, all free (one machine, the Monetization rule). Scope: 13.1 messages and tasks with 13.1b delivery, 13.3 claims and presence, 13.5 visibility, 13.6 freshness. REVIEWER-A's REV-010 pass (its scheduled pass before a phase) runs first, and the Worker's design note docs/design/13a-coordination.md is step 0, on release-0.17.0.
 ```
 
+## 01M7ZDEN417F4NB0K1Q2GCCSMH
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.plugin-directory`
+- scope: private
+- created: 2026-11-21T16:01:27Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795277332,"_mnemo.key":"decision.plugin-directory","_mnemo.superseded_by":"01M7ZDW7QRX6WCBH86CT0ZYXEV"}`
+
+```text
+Decision (user, 2026-11-21, 'Yes'): list the mnemo Claude Code plugin (integrations/claude-code) in Anthropic's plugin directory (claude.ai/directory/manage, plugin bundles only; the desktop-extension directory no longer takes .mcpb and the connectors directory takes remote servers only). When: a patch release right after v0.21.0 (v0.21.1), before roadmap step 2. Work for worker-a: a shell launcher inside the plugin (${CLAUDE_PLUGIN_ROOT}) that runs the installed mnemo or says how to install it, keeping the binary out of the plugin (binaries are held for review); a README section disclosing the one-time model download and that nothing else leaves the machine; a pass over Anthropic's pre-submission checklist. Open, ask directory@anthropic.com: does a bare command on the PATH pass the command-path check, and does a directory listing appear in claude-plugins-official. The submission itself is the user's (their claude.ai account, a paid plan). Google and OpenAI equivalents: being researched.
+```
+
+## 01M7ZDW7QRX6WCBH86CT0ZYXEV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.plugin-directory`
+- scope: private
+- created: 2026-11-21T16:08:52Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.plugin-directory","_mnemo.supersedes":"01M7ZDEN417F4NB0K1Q2GCCSMH"}`
+
+```text
+Decision (user, 2026-11-21, 'Yes', then 'Antigravity + Gemini CLI'): v0.21.1, a patch right after v0.21.0 and before roadmap step 2, lists mnemo's plugin in (a) Anthropic's plugin directory (claude.ai/directory/manage, plugin bundles only), (b) Google Antigravity's plugin marketplace (agy plugin validate --strict, then an interest form; acceptance not guaranteed), (c) the Gemini CLI extensions gallery (gemini-extension.json at the repo root and the gemini-cli-extension topic; a crawler lists it), and (d) a Codex catalog file in our repo (.agents/plugins/marketplace.json; no review). Not OpenAI's directory: hooks banned, local servers partners only (status.plugin-directories). Work for worker-a: a shell launcher inside each plugin that runs the installed mnemo or says how to install it, keeping the binary out of the plugin; a README section disclosing the one-time model download and that nothing else leaves the machine; Anthropic's pre-submission checklist. Ask directory@anthropic.com whether a PATH command passes and whether a listing reaches claude-plugins-official. The submissions, the forms and the repo topic (a GitHub setting) are the user's.
+```
+
 ## 01M7PBZ94MBPZ7BDY2J0FY9G76
 
 - type: episodic
@@ -683,6 +851,34 @@ Decision (user, 2026-11-17): positioning — "MNemo doesn't compete with vector 
 
 ```text
 2026-11-15, the user ("Yes", R-010.4 confirming PLANNER-A): "memory" is the category word (headline, search, comparisons); "project brain" names the file (.git/mnemo/project.mnemo) every time; "shared memory for your agents" is the qualified phrase, or "shared memory and coordination for your agents" when introducing 13a, never "shared memory" alone (the OS term); "coordinate"/"coordination" are the verbs once 13a ships (rule of thumb: "You run the agents; they remember and coordinate through MNemo"); never "orchestration" or "swarm", since MNemo starts no agents. Applies to the site, READMEs, guide and llms.txt from v0.17.0.
+```
+
+## 01M83N4DG8BP35Y8EPF06HBBE5
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.readme-lead`
+- scope: private
+- created: 2026-11-23T07:32:38Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795420947,"_mnemo.key":"decision.readme-lead","_mnemo.superseded_by":"01M83PV13VM3E5HSKVTZZ21MQG"}`
+
+```text
+Decision (user, 2026-11-22): the README and site lead with what MNemo replaces, not the language: 'Shared memory for your coding agents. It replaces the CLAUDE.md junk drawer and the plain-text notes folder with one encrypted file on your machine, which Claude Code, Cursor and any MCP client share.' Rules stay in CLAUDE.md or AGENTS.md; what agents learn goes into MNemo. 'Written in Rust' is dropped as a selling point (it reads as a gimmick); Rust is named only as a fact (the library, cargo, the API). The site's facts row says 'Memory-safe core, no unsafe code'. The crates.io and PyPI descriptions keep 'Rust engine'. The GitHub repo description is the user's to change.
+```
+
+## 01M83PV13VM3E5HSKVTZZ21MQG
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.readme-lead`
+- scope: private
+- created: 2026-11-23T08:02:27Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.readme-lead","_mnemo.supersedes":"01M83N4DG8BP35Y8EPF06HBBE5"}`
+
+```text
+Decision (user, 2026-11-22): the README and site lead with what MNemo replaces, not the language: 'Shared memory for your coding agents. It replaces the CLAUDE.md junk drawer and the plain-text notes folder with one encrypted file on your machine, which Claude Code, Cursor and any MCP client share.' Rules stay in CLAUDE.md or AGENTS.md; what agents learn goes into MNemo. 'Written in Rust' is dropped as a selling point (it reads as a gimmick); Rust is named only as a fact (the library, cargo, the API). The site's facts row says 'Memory-safe core, no unsafe code' (hand-off handoff-readme-lead). The crates.io and PyPI descriptions keep 'Rust engine'. The GitHub repo description, set by the user 2026-11-23 and checked with gh: 'Shared memory for your coding agents: one encrypted, local-first file that replaces the CLAUDE.md junk drawer.'
 ```
 
 ## 01M7E8YFE4MZ6SMEN620EDP230
@@ -847,10 +1043,38 @@ Roadmap order (user decisions 2026-11-18 "Aligned"; 2026-11-19 "Yes" to REV-011.
 - scope: private
 - created: 2026-11-20T02:37:48Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.roadmap-order","_mnemo.supersedes":"01M7V07X0H53ZA4XESGER8YR4D"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795248120,"_mnemo.key":"decision.roadmap-order","_mnemo.superseded_by":"01M7YJ0RK9742W7JW8WBEY1SBD","_mnemo.supersedes":"01M7V07X0H53ZA4XESGER8YR4D"}`
 
 ```text
 Roadmap order (user decisions 2026-11-18 "Aligned"; 2026-11-19 "Yes" to REV-011.6; 2026-11-19 REV-012 answers and "Switch merge and more editors, 1 and 2, and go"; 2026-11-19 "let do it" to v0.20.1 mnemo wait first, with a reviewer spec check before the Worker builds). Paid features on hold: relay protocol, hosted relay (Pro), 13.2 key slots, 13.4 signatures, Teams, hosted brains (REV-011). After v0.20.0, in this order. Core: (0) v0.20.1 mnemo wait, one wake signal from the brain for every editor (spec.v0201-wait, status.cross-editor-wake); (1) 13.7 mnemo merge; (2) more editors in mnemo onboard (REV-012.2): Codex and Google Antigravity first, then VS Code and Windsurf/Devin Desktop, each with MCP, hooks where the client has them, the guide, and its way to wake (REV-014 verifies each editor); (3) sync change sets on disk (sequential immutable files fit for object-storage conditional writes, REV-011.4); wake-ups across devices ride these; (4) smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones, opt-in turn-to-fact consolidation as keyed deltas (REV-012.1), MCP elicitation, mnemo doctor, status.backlog-small; (5) public benchmarks against CLAUDE.md plus notes, claude-mem and Mem0 (REV-012.3). Reach: (6) Node.js (AI SDK memory package first, then eve, then the sandbox guide). Bonus: (7) mobile see-and-delete screens (REV-012.4). Mobile releases stay decoupled from engine-only releases. Ideas explored: docs/ideas.md.
+```
+
+## 01M7YJ0RK9742W7JW8WBEY1SBD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.roadmap-order`
+- scope: private
+- created: 2026-11-21T08:02:00Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795248313,"_mnemo.key":"decision.roadmap-order","_mnemo.superseded_by":"01M7YJ6MW45ACSH1ZZCDY0R3WV","_mnemo.supersedes":"01M7VD2D87P32164ST1J8PPB1T"}`
+
+```text
+Roadmap order (user decisions 2026-11-21 "Aligned" to REV-016.1: attached brains after smarter memory; 2026-11-20 "Yes" to v0.20.2; 2026-11-18 "Aligned"; 2026-11-19 "Yes" to REV-011.6; 2026-11-19 REV-012 answers and "Switch merge and more editors, 1 and 2, and go"; 2026-11-19 "let do it" to v0.20.1 mnemo wait first, with a reviewer spec check before the Worker builds). Paid features on hold: relay protocol, hosted relay (Pro), 13.2 key slots, 13.4 signatures, Teams, hosted brains (REV-011). After v0.20.0, in this order. Core: (0) v0.20.1 mnemo wait, one wake signal from the brain for every editor (spec.v0201-wait, status.cross-editor-wake); (0b) v0.20.2 use what we built (decision.v0202-use-what-we-built, spec.v0202); (1) 13.7 mnemo merge; (2) more editors in mnemo onboard (REV-012.2): Codex and Google Antigravity first, then VS Code and Windsurf/Devin Desktop, each with MCP, hooks where the client has them, the guide, and its way to wake (REV-014 verifies each editor); (3) sync change sets on disk (sequential immutable files fit for object-storage conditional writes, REV-011.4); wake-ups across devices ride these; (4) smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones, opt-in turn-to-fact consolidation as keyed deltas (REV-012.1), MCP elicitation, mnemo doctor, status.backlog-small; (4b) attached brains (REV-016.1, decision.brain-boundaries; feature name to confirm with the user): a session reads several .mnemo files at once (read-only attach first, e.g. a personal brain or a playbook beside the project), one recall across them with each hit tagged by its brain, writes to one brain only, no format change; (5) public benchmarks against CLAUDE.md plus notes, claude-mem and Mem0 (REV-012.3). Reach: (6) Node.js (AI SDK memory package first, then eve, then the sandbox guide). Bonus: (7) mobile see-and-delete screens (REV-012.4). Mobile releases stay decoupled from engine-only releases. Ideas explored: docs/ideas.md.
+```
+
+## 01M7YJ6MW45ACSH1ZZCDY0R3WV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.roadmap-order`
+- scope: private
+- created: 2026-11-21T08:05:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.roadmap-order","_mnemo.supersedes":"01M7YJ0RK9742W7JW8WBEY1SBD"}`
+
+```text
+Roadmap order (user decisions 2026-11-21 "Aligned" to REV-016.1: attached brains after smarter memory; 2026-11-20 "Yes" to v0.20.2; 2026-11-18 "Aligned"; 2026-11-19 "Yes" to REV-011.6; 2026-11-19 REV-012 answers and "Switch merge and more editors, 1 and 2, and go"; 2026-11-19 "let do it" to v0.20.1 mnemo wait first, with a reviewer spec check before the Worker builds). Paid features on hold: relay protocol, hosted relay (Pro), 13.2 key slots, 13.4 signatures, Teams, hosted brains (REV-011). After v0.20.0, in this order. Core: (0) v0.20.1 mnemo wait, one wake signal from the brain for every editor (spec.v0201-wait, status.cross-editor-wake); (0b) v0.20.2 use what we built (decision.v0202-use-what-we-built, spec.v0202); (1) 13.7 mnemo merge; (2) more editors in mnemo onboard (REV-012.2): Codex and Google Antigravity first, then VS Code and Windsurf/Devin Desktop, each with MCP, hooks where the client has them, the guide, and its way to wake (REV-014 verifies each editor); (3) sync change sets on disk (sequential immutable files fit for object-storage conditional writes, REV-011.4); wake-ups across devices ride these; (4) smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones, opt-in turn-to-fact consolidation as keyed deltas (REV-012.1), MCP elicitation, mnemo doctor, status.backlog-small; (4b) attached brains (REV-016.1, decision.brain-boundaries; name: attached brains, --attach; user 2026-11-21): a session reads several .mnemo files at once (read-only attach first, e.g. a personal brain or a playbook beside the project), one recall across them with each hit tagged by its brain, writes to one brain only, no format change; (5) public benchmarks against CLAUDE.md plus notes, claude-mem and Mem0 (REV-012.3). Reach: (6) Node.js (AI SDK memory package first, then eve, then the sandbox guide). Bonus: (7) mobile see-and-delete screens (REV-012.4). Mobile releases stay decoupled from engine-only releases. Ideas explored: docs/ideas.md.
 ```
 
 ## 01M7PEYPSTKP6NTD4E8NBCMWV8
@@ -909,6 +1133,20 @@ Decision (2026-11-17): a SECURITY finding record is written private until verifi
 2026-11-15, the user's three choices for the landing page redesign (index.html, live as PR 101, 05a5ca4): the problem-first headline ('Your coding agent forgets. Give it a memory.'); light and dark themes that follow the system, with a toggle kept in localStorage; and the page presents mnemo as free only, with sync as a roadmap line. The user reviews the live page and asks for changes.
 ```
 
+## 01M7ZN9DFBNK1J9E1XEVBTC5R7
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.site-publish`
+- scope: private
+- created: 2026-11-21T18:18:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.site-publish"}`
+
+```text
+Decision (user, 2026-11-21, 'Yes' to SEO step 1, then 'Okay a'): GitHub Pages moves from serving main's root (legacy) to a GitHub Actions workflow that publishes an assembled site: the root index.html (it stays at the root for now and moves into site/ later with no address change), everything in site/ at the site's root (new pages and assets: the sitemap, the social card, later the guide pages), docs/img/ (the page loads docs/img/demo.gif and inspect-findings.png), and the files whose addresses must not change: install.sh, install.ps1, llms.txt, llms-full.txt, .claude-plugin/marketplace.json. The rest of the repo stops being published. The user switches Settings > Pages > Source to GitHub Actions (theirs). robots.txt does nothing under /mnemo/ and is dropped unless we get our own domain (optional, the user's). SEO step 1 (planner-a's index.html edits, 2026-11-21): a search title, a shorter description, a canonical link, Open Graph image tags and a Twitter card for site/social-card.png (1200x630), and JSON-LD SoftwareApplication. Next for the user: Google Search Console for the /mnemo/ prefix, submitting the sitemap. Then the guide pages and catalog listings, each drafted for the user's approval.
+```
+
 ## 01M7E9BES46T2W9CQJZNVNXQMW
 
 - type: episodic
@@ -951,6 +1189,34 @@ Decision (2026-11-17): a SECURITY finding record is written private until verifi
 Decision (user, 2026-11-18): build the whole sync product, not gated on the waitlist ("Let's not wait for signups, we build the full product ... the product is [what's important]"). After v0.20.0, in docs/design/sync.md's build order, each step its own release with a REVIEWER-B pass: (1) 13.7 mnemo merge with the HLC and merge conflicts (free); (2) change sets on disk, mnemo sync export/import (free); (3) the relay protocol with a test relay; (4) the hosted relay, Pro (private repo; pricing, hosting and the business prerequisites are the user's, before it ships); (5) Teams after 13.2 key slots and 13.4 signatures. Planner's default: messages don't sync in the first version.
 ```
 
+## 01M807RPXM6SV8C2WP3S7T9CQT
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.turn-markers-fold`
+- scope: private
+- created: 2026-11-21T23:41:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795304694,"_mnemo.key":"decision.turn-markers-fold","_mnemo.superseded_by":"01M807Z8YFTH7KNW0NW8046CSS"}`
+
+```text
+Decision (user, 2026-11-21, 'Aligned', on G14 in status.dogfood-gaps): saved turns keep embeddings when they hold real text (4,704 of 32,092 turns in the brain, about 3.6 MB of vectors for 2.7 MB of text; recall finds past conversation by meaning, and context recovery after a summary depends on it). Marker-only turns stop being records of their own: the save folds each run of marker-only entries into the turn before it (or one record per run when there is none), and a compaction folds existing ones, with no format change and nothing lost from the transcript. Checked in code (transcript.rs flatten_blocks; the hooks use ToolResults::Omit): the markers hold only the tool's name, ok or error with the output's size, and the block type ([thinking], [image]); no tool inputs, no tool output, no thinking text, so no secrets and nothing the essence needs. Dropping old turns' vectors at compaction (keywords only) is not chosen; it comes back if size still matters after the fold. Release placement (v0.21.1 beside mnemo backup, or the smarter-memory step) is the user's call, pending.
+```
+
+## 01M807Z8YFTH7KNW0NW8046CSS
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.turn-markers-fold`
+- scope: private
+- created: 2026-11-21T23:44:54Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.turn-markers-fold","_mnemo.supersedes":"01M807RPXM6SV8C2WP3S7T9CQT"}`
+
+```text
+Decision (user, 2026-11-21, 'Aligned', on G14 in status.dogfood-gaps): saved turns keep embeddings when they hold real text (4,704 of 32,092 turns in the brain, about 3.6 MB of vectors for 2.7 MB of text; recall finds past conversation by meaning, and context recovery after a summary depends on it). Marker-only turns stop being records of their own: the save folds each run of marker-only entries into the turn before it (or one record per run when there is none), and a compaction folds existing ones, with no format change and nothing lost from the transcript. Checked in code (transcript.rs flatten_blocks; the hooks use ToolResults::Omit): the markers hold only the tool's name, ok or error with the output's size, and the block type ([thinking], [image]); no tool inputs, no tool output, no thinking text, so no secrets and nothing the essence needs. Dropping old turns' vectors at compaction (keywords only) is not chosen; it comes back if size still matters after the fold. Placement (user, 2026-11-21, 'Smarter memory'): roadmap step 4, smarter memory (decision.roadmap-order), with status.backlog-small (15)-(18); not v0.21.1.
+```
+
 ## 01M7XY27P8DD5GQP8MJ3V67ATB
 
 - type: episodic
@@ -977,6 +1243,160 @@ decision.v0202-use-what-we-built (user, 2026-11-20): (1) YES: a v0.20.2 patch, '
 
 ```text
 decision.v0202-use-what-we-built (user, 2026-11-20): (1) YES: a v0.20.2 patch, 'use what we built', after v0.20.1 and before merge, from status.dogfood-gaps: G1 get --key, G3 turn recall and recall --thread (the essence footer advertises it; it doesn't exist), G4 an MCP get, G7 ids in essence render, G8 stale unkeyed decisions ranking in recall, G9 a CLI stats, and G2's hooks (thread essence). The Planner writes spec.v0202 and the tasks after v0.20.1 ships. (2) YES, as a trial ('let's see if it works in actual practice'): G6 brain-only pointers. Once v0.20.1 is released and every session runs mnemo wait, a pointer is a brain post only (mnemo post <agent> '<pointer>'), with no cross-session message; the WAITING for the user is still told to the user directly. Fallback: if a pointer isn't picked up within 10 minutes, the sender also sends the cross-session message and logs the miss in status.pointer-trial. Protocol text (AGENTS.md tmux rule 1 and 10) changes through a hand-off on release-0.20.2 after the trial's first few pointers. (3) YES, a small test (user, 2026-11-20): G5 claims in v0.20.2. The Planner takes a claim (mnemo claim take file:<path>) before editing a Planner-owned file and releases it at the hand-off; the Worker takes tree:checkout while it switches branches and runs mnemo claim who before staging or switching. Advisory only; misses and friction go in status.pointer-trial.
+```
+
+## 01M85N96GKNYSCZ4H7W0XYGZZ2
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-5f-older-builds`
+- scope: private
+- created: 2026-11-24T02:13:43Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-5f-older-builds"}`
+
+```text
+Planner decision 2026-11-23 on report.v0210-5f's BLOCKED (two 2,048-case proptest failures with older-build key versions), checked in merge.rs (key_of and number fall back to created_at*1000 for an unstamped version). (1) Seed ccd5d7, merge(x,x)=x: place a version an older build wrote, with no first stamp, by its id's millisecond (the ULID's time, n>>80), not created_at*1000. That is the triage's 'when it was created', to the millisecond, so it is not a deviation, and it fixes the same-second case. What's left, this build's stamps running ahead of the wall clock (after a merge with a fast-clock copy) and then an older build writing the same key in that copy, is inherent: no rule can see the true order. Limit the property for exactly that case (OlderKeyed after this build's write on the same key, in a copy whose clock runs ahead) and document it in the guide and CHANGELOG beside the older-deletes note. (2) Seed bbed7a, associativity: keep fixing (option A). Two machines still on v0.20.2 writing over one base version is the likely upgrade path, so the result must not depend on merge order. Time box: within this round; if no fix keeps every existing test plus the new four-copy case (ops_d=[OlderKeyed(0,0)]), stop and report BLOCKED with what was tried, and the Planner takes (B) for (2) to the user. Either way the report says whether the naming difference reaches anything beyond _mnemo.ver (the live value, flags, a later merge's report). Also: give the 'covered fact keeps its flag' survivor a test or a short proof that it's equivalent, and re-run the four 2,048-case mutations after the fixes. Round count: still fix round 1 (a decision inside a round adds none).
+```
+
+## 01M7ZVXABPHZZMS0P889TKBZHB
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-ancestry`
+- scope: private
+- created: 2026-11-21T20:14:07Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795292053,"_mnemo.key":"decision.v0210-ancestry","_mnemo.superseded_by":"01M7ZVXGDQXX8S3VMPATQF39HA"}`
+
+```text
+Decision (planner-a, 2026-11-21, on report.v0210-2's BLOCKED; a spec ruling inside spec.v0210, no change to the user's choices): option A. Every in-place rewrite by a v0.21+ build records the stamps the record held before, the 8 largest, in _mnemo.hlc_prev (written by put; metadata, no format change). In the merge, version x is an ancestor of version y (same id) when x's _mnemo.hlc equals y's or is in y's _mnemo.hlc_prev AND x's content differs from y's only by y's own edits; equal stamps with different content (an older build edited both, keeping the stamp) are never ancestry: compare numbers and make a conflict copy as rule (3) says. The descendant wins with no copy and no flag; only versions where neither is an ancestor of the other are concurrent, and only they get rule (3)'s conflict copy or _mnemo.merge_conflict. A merged record's list: the 8 largest of both inputs' stamps and lists (commutative and associative). Older-build versions and ancestors more than 8 edits back fall back to rule (3): conservative, never a lost edit. For tasks, findings and essence items, a one-sided move or edit wins; 'other fields from the larger number' applies only to concurrent versions. Rejected: B (guessing the divergence point from identical records depends on clocks and can lose a skewed copy's edit with no trace); C (every one-sided edit a conflict buries the real ones). Tests: a one-sided edit makes no conflict; nine edits on one side against the untouched version gives the conservative copy; an older build's edit on both sides with equal stamps conflicts; prop_three_copies must pass.
+```
+
+## 01M7ZVXGDQXX8S3VMPATQF39HA
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-ancestry`
+- scope: private
+- created: 2026-11-21T20:14:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-ancestry","_mnemo.supersedes":"01M7ZVXABPHZZMS0P889TKBZHB"}`
+
+```text
+Decision (planner-a, 2026-11-21, on report.v0210-2's BLOCKED; a spec ruling inside spec.v0210, no change to the user's choices): option A. Every in-place rewrite by a v0.21+ build records the stamps the record held before, the 8 largest, in _mnemo.hlc_prev (written by put; metadata, no format change). In the merge, version x is an ancestor of version y (same id) when x's _mnemo.hlc equals y's or is in y's _mnemo.hlc_prev, and x and y are not equal-stamped with different content; equal stamps with different content (an older build edited both, keeping the stamp) are never ancestry: compare numbers and make a conflict copy as rule (3) says. The descendant wins with no copy and no flag; only versions where neither is an ancestor of the other are concurrent, and only they get rule (3)'s conflict copy or _mnemo.merge_conflict. A merged record's list: the 8 largest of both inputs' stamps and lists (commutative and associative). Older-build versions and ancestors more than 8 edits back fall back to rule (3): conservative, never a lost edit. For tasks, findings and essence items, a one-sided move or edit wins; 'other fields from the larger number' applies only to concurrent versions. Rejected: B (guessing the divergence point from identical records depends on clocks and can lose a skewed copy's edit with no trace); C (every one-sided edit a conflict buries the real ones). Tests: a one-sided edit makes no conflict; nine edits on one side against the untouched version gives the conservative copy; an older build's edit on both sides with equal stamps conflicts; prop_three_copies must pass. (rev 2: dropped an untestable content clause; ancestry is the stamp check alone, with the equal-stamp exception.)
+```
+
+## 01M82RY99PPNEGQX50RMWRX55G
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-chain-rule`
+- scope: private
+- created: 2026-11-22T23:19:56Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-chain-rule"}`
+
+```text
+Decision (user, 2026-11-22, on report.v0210-2's third BLOCKED, seed 91d13c7): option A, and a fourth round is approved (hop cap, rule 5). A merge marks each version whose supersedes link it made, with one new reserved key the Worker names (e.g. _mnemo.merge_linked); put strips it on a new write. Each merge orders a slot from write-made links and first-written stamps only, so a slot's chain is a function of what was written and merge is associative by construction. The user asked to borrow from Git; the Planner's reading, for the Worker to apply where it fits and report any deviation: (1) merge-made links are Git's merge commits, never ordinary writes: a later merge never treats one as a write, it recomputes from the written history, as Git recomputes the merge base from the commit graph. (2) Three-way thinking: judge each side against what both copies share (the common versions by write-made links and _mnemo.hlc_prev); a side that changed nothing since then yields with no flag (Git's fast-forward), matching decision.v0210-ancestry. (3) Modify/delete stays decision.v0210-merge-rules (1): a forget removes only what it named, a write the forgetting copy never saw is kept, and the report names the key (Git reports a modify/delete conflict rather than drop either side). (4) The same change on both sides is no conflict (Git's both-added-identically), as d3c1c86 does. (5) merge(x,x)=x and merging a copy's own descendant changes nothing: add both as property checks if missing. Acceptance: all three proptests pass at 2,048 cases with every saved seed, the full suite, clippy and fmt clean, and the full mutation run (46). If this round blocks, it goes to the user, not a fifth round.
+```
+
+## 01M809JT2MM73FSAS80EGJNVVS
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-conflict-flags`
+- scope: private
+- created: 2026-11-22T00:13:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-conflict-flags"}`
+
+```text
+Decision (planner-a, 2026-11-21, on report.v0210-2's second BLOCKED; amends spec.v0210 rev 2 rule (3), which the Planner wrote from RB-019.3 and RB-019.4, so no user decision is touched): OPTION A. Conflict flags and conflict copies follow the versions that conflicted, so merge stays associative for copies of copies too, which roadmap step 3 (change sets, many machines) depends on. (1) Essence items, tasks and findings: _mnemo.merge_conflict is set when the two versions are concurrent (neither descends from the other by the ancestry check) and their texts differ; the status condition is removed. Status still merges as the spec says (resolved, done, verified are final; otherwise the newest history entry). (2) A flag records the [stamp, ver] pairs of the versions that conflicted in one new reserved key (the Worker names it, documents it in the CHANGELOG and the crate README beside _mnemo.merge_conflict); the flag and the key go when the merge's winner descends from every version listed. (3) A conflict copy keeps its source's [stamp, ver] and is dropped when the winner descends from that version; this replaces or subsumes fix (4) of d3c1c86, the Worker's call, shown by the tests. (4) Fixes (1) to (3) of d3c1c86 are accepted, and so are the report's deviations: _mnemo.hlc_prev holds [stamp, _mnemo.ver] pairs, merged versions are marked VER_MERGED (bit 62) and never listed, and MergeReport.merged counts no claims or presence. (5) Ancestry stays decision.v0210-ancestry's window (the 8 largest prior pairs): past it a merge may keep an extra copy or flag, never lose a version; the proptests keep histories inside the window, one deterministic test shows the conservative side past it, and the CHANGELOG says so. (6) Tests: prop_three_copies gets a fourth input copied from another input after its ops (a copy of a copy), and the laws hold for it; the committed seed 083bdc4a and the report's x/y/z case become fixed tests; the mutation script again, every mutation killed. Then the full suite, the PR into release-0.21.0, and DONE. Options B (documented extra copies) and C (comparing without flags) are not chosen: either would make two machines that merge in different orders end up with different records.
+```
+
+## 01M7ZDVZKCM510MHDCDVWJEYE0
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-merge-rules`
+- scope: private
+- created: 2026-11-21T16:08:43Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-merge-rules"}`
+
+```text
+Decision (user, 2026-11-21, on RB-019): (1) merge deletes are id-level with no clock: a delete removes exactly the record it named, in every merge; a newer version of the same key that the deleting copy never saw is kept, and the merge report names the key. This replaces docs/design/sync.md section 7's 'newest action wins' for deletes. (2) Two files are the same brain when their salts match or both manifests have the same ULID, so a rekeyed copy can still be merged; the second input then needs its own secret. (3) Plugin listings in v0.21.1: Anthropic's directory, Antigravity's marketplace (the user sends the interest form), the Gemini CLI gallery, and a Codex catalog file in our repo; not OpenAI's directory (hooks banned, local servers partners only). Keep every delete marker (no horizon before sync change sets).
+```
+
+## 01M809ZMNEZTQNH70CFDQWNV67
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-reviews`
+- scope: private
+- created: 2026-11-22T00:20:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795306824,"_mnemo.key":"decision.v0210-reviews","_mnemo.superseded_by":"01M80A08R9X7DS6F1F7SRDXAS9"}`
+
+```text
+Decision (user, 2026-11-21: 'the merge is something we need reviewer-b and possibly reviewer-a opinion on when done'): v0.21.0's merge gets reviews at READY (v0210-5), after v0210-4's dogfood, so both read a real merge report from copies of the brain. REVIEWER-B, batch RB-020 (scheduled anyway: a minor release's READY): the built merge against spec.v0210 rev 2 as amended by decision.v0210-ancestry and decision.v0210-conflict-flags; the laws (commutative, idempotent, associative, copies of copies) and whether the proptests really exercise them; deletes and markers (nothing a marker names survives under any id); the secrets for rekeyed copies and the new data key; nothing left behind on a failure; the CLI and Python surfaces; the v0.20.2 fixtures. Not in scope: code outside the merge, benchmarks. REVIEWER-A (off-cycle, called by the user; pending the user's yes on scope): product only, no code review: whether conflict copies, flags and the report are what a user can act on, the wording of the CLI and the guide, how other tools present a merge of diverged copies (git, Obsidian Sync, Apple Notes, CRDT apps such as Automerge-based ones), and whether the design fits the sync roadmap (change sets, then Pro). Both run in parallel; findings triaged together, so the fixes are one round.
+```
+
+## 01M80A08R9X7DS6F1F7SRDXAS9
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-reviews`
+- scope: private
+- created: 2026-11-22T00:20:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-reviews","_mnemo.supersedes":"01M809ZMNEZTQNH70CFDQWNV67"}`
+
+```text
+Decision (user, 2026-11-21: 'the merge is something we need reviewer-b and possibly reviewer-a opinion on when done'): v0.21.0's merge gets reviews at READY (v0210-5), after v0210-4's dogfood, so both read a real merge report from copies of the brain. REVIEWER-B, batch RB-020 (scheduled anyway: a minor release's READY): the built merge against spec.v0210 rev 2 as amended by decision.v0210-ancestry and decision.v0210-conflict-flags; the laws (commutative, idempotent, associative, copies of copies) and whether the proptests really exercise them; deletes and markers (nothing a marker names survives under any id); the secrets for rekeyed copies and the new data key; nothing left behind on a failure; the CLI and Python surfaces; the v0.20.2 fixtures. Not in scope: code outside the merge, benchmarks. REVIEWER-A (off-cycle, called by the user; scope confirmed 2026-11-21, 'Yes, product scope'): product only, no code review: whether conflict copies, flags and the report are what a user can act on, the wording of the CLI and the guide, how other tools present a merge of diverged copies (git, Obsidian Sync, Apple Notes, CRDT apps such as Automerge-based ones), and whether the design fits the sync roadmap (change sets, then Pro). Both run in parallel; findings triaged together, so the fixes are one round.
+```
+
+## 01M84X28NR302GVYNSEP11SXZK
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-reviews-round`
+- scope: private
+- created: 2026-11-23T19:10:30Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-reviews-round"}`
+
+```text
+Decision (user, 2026-11-23): RB-020 found a tag-blocking bug (RB-020.1), and REVIEWER-A had not started, so the RB-020 fixes start at once (v0210-5f) instead of waiting to triage with REV-019; REV-019's findings come as a second small round. Amends decision.v0210-reviews' 'one round'.
+```
+
+## 01M7YJP1MS84WNVP30VWXHJAAC
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-start`
+- scope: private
+- created: 2026-11-21T08:13:37Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-start"}`
+
+```text
+decision.v0210-start (user 'go ahead', 2026-11-21): start roadmap step 1, 13.7 mnemo merge, as minor release v0.21.0 (decision.roadmap-order, decision.sync-build step 1, docs/design/sync.md sections 6, 7, 11, 12). The Planner writes spec.v0210 from the design and live code; REVIEWER-B reviews at READY (sync.md: each sync step gets a REVIEWER-B pass since it writes encrypted files). Recall note: a recall for the merge design found nothing; the design lives in docs/design/sync.md, a file, not in the brain.
+```
+
+## 01M849D5KT9NKP6PG4RK02KSVP
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0210-task-status`
+- scope: private
+- created: 2026-11-23T13:26:56Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0210-task-status"}`
+
+```text
+Decision (planner-a, 2026-11-23, on report.v0210-4's finding; a spec ruling inside spec.v0210): in a merge, a task's status comes from the last history entry that changed it (from != to); a note-only entry (from == to) never sets the status. When both copies changed the status since they diverged and end on different statuses, the later change wins and the task is flagged _mnemo.merge_conflict, like other concurrent edits. Findings follow the same rule if their status history has note-only entries. Found in the dogfood: laptop moved a task active->blocked, desktop added a note a second later, and the merged task came back active with no flag.
 ```
 
 ## 01M7RXSC9R1RYP7Q6TZ9E2SFZR
@@ -2841,6 +3261,90 @@ v0.17.1 READY again (2026-11-16): release-0.17.1 at 6d0288a after PR 117 (onboar
 v0.17.2 READY (2026-11-17): release-0.17.2 at bf73ef8, Run 1's five rounds (PR 118 READY-NOTICE, PR 119 presence at start and polish, PR 120 MODEL-RETRY and WHO-SHAPE, PR 121 the legacy scan and the claim race, PR 122 the bump) after the rule 9 handoff e8dbdd4. The dry run 44081832937 (mobile off) succeeded: 23 jobs, 9 skipped; version check read 0.17.2; CI and Mobile CI passed on bf73ef8.
 ```
 
+## 01M83QFNHDXTQYBK1C1EJ3FSVF
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.handoff-inspect-mockup`
+- scope: private
+- created: 2026-11-23T08:13:43Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.handoff-inspect-mockup","area":"report","topic":"handoff-inspect-mockup"}`
+
+```text
+report.handoff-inspect-mockup (worker-a, 2026-11-23): DONE. Recall: found (decision.inspect-refresh, spec.v0212-inspect). Committed exactly docs/design/inspect-refresh/overview-light.dc.html and docs/design/inspect-refresh/attached-brains-dark.dc.html as their own commit 9dfd95b on release-0.21.0 (2 files, 320 insertions), message as given; pushed. No code in the commit.
+```
+
+## 01M83QFNY2KF06SPHVVMEHASR4
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.handoff-readme-lead`
+- scope: private
+- created: 2026-11-23T08:13:44Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.handoff-readme-lead","area":"report","topic":"handoff-readme-lead"}`
+
+```text
+report.handoff-readme-lead (worker-a, 2026-11-23): DONE. Recall: found (the user's 2026-11-22 decision that the README and site lead with what MNemo replaces). Committed exactly README.md and index.html as their own commit 43969c9 on release-0.21.0 (2 files, 10 insertions, 8 deletions), message as given; pushed. The diff matched the hand-off: the README opening (the CLAUDE.md junk drawer and the notes folder, no 'Written in Rust') and index.html's facts row ('Memory-safe core, no unsafe code').
+```
+
+## 01M86CFZCXFQ79X6T0YBCR6F6E
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.handoff-sync-md`
+- scope: private
+- created: 2026-11-24T08:59:22Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.handoff-sync-md","area":"report","topic":"handoff-sync-md"}`
+
+```text
+report.handoff-sync-md (worker-a, 2026-11-24): DONE. Recall at start: found (report.v0202-8h, the hand-off pattern). claim who: planner-a held file:README.md and file:index.html, not sync.md. The tree held docs/design/sync.md modified (24 insertions, 11 deletions; section 7 to the shipped merge rules; no home paths, emails or token shapes), the same file on main and release-0.21.0 before it. COMMIT 0c1d248 'docs(sync): section 7 follows the merge rules v0.21.0 ships (REV-019.4)', docs/design/sync.md only, on branch handoff-sync-md from release-0.21.0 at d29d4b8 (inside a tree:checkout claim); PR #184 into release-0.21.0, which reported no checks (docs paths are outside CI) and was MERGEABLE and CLEAN; squash-merged as 8b277f7 on release-0.21.0 (branch deleted, under a tree:checkout claim, released). Left as they are: README.md and index.html, modified by planner-a under its claims while this ran, and .claude/.
+```
+
+## 01M7ZQZWS7Y1SWK48TKGFJMJQM
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.site-1`
+- scope: private
+- created: 2026-11-21T19:05:37Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795289426,"_mnemo.key":"report.site-1","_mnemo.superseded_by":"01M7ZSDACSRDFRVJ7951W4063Z","area":"report","topic":"site-1"}`
+
+```text
+report.site-1 (worker-a, 2026-11-21): WAITING for the user's Pages switch (Settings > Pages > Source: GitHub Actions). RECALL: found (decision.site-publish; nothing earlier on a Pages workflow). LANDED (target: main, then main merged into release-0.21.0, so it can go live before v0.21.0 and main stays fast-forwardable): (6) the hand-off index.html as its own commit a45ad31 'docs(site): search title, description, canonical, social card tags and structured data' (PR #171, index.html only; no checks ran, since CI skips a lone index.html and pages.yml wasn't on main yet); (1)-(4) PR #172 squash-merged as 543b6b6, every check passed (incl. the new 'assemble the site'; deploy skipped): .github/workflows/pages.yml (push to main, workflow_dispatch, and PRs touching the site, which never deploy; configure-pages v6.0.0 45bfe01, upload-pages-artifact v5.0.0 fc324d3 with include-hidden-files for .claude-plugin/, deploy-pages v5.0.1 368f825, checkout v7.0.1, all pinned by SHA); .github/scripts/assemble-site.sh (POSIX sh, shellchecked in CI's scripts job) takes exactly the decision's list, fails on a missing listed file or a site/ file that would replace another, and a separate check step fails unless all 10 published addresses are in the artifact (index.html, install.sh, install.ps1, llms.txt, llms-full.txt, .claude-plugin/marketplace.json, docs/img/demo.gif, docs/img/inspect-findings.png, sitemap.xml, social-card.png). Tested here: the assembly lists all 10 as ok; a missing file, a collision and a check on a folder without social-card.png each exit 1. site/sitemap.xml (the home page); site/social-card.png 1200x630, 45,984 bytes, the page's dark palette and Helvetica Neue/Menlo, the two lines the task gives, no version, drawn by docs/img/social-card.py; RELEASING.md (after the tag: check pages.yml's run and install.sh); AGENTS.md's row for the install scripts and site files. Then PR #173 merged main into release-0.21.0 with a merge commit (RELEASING.md's rule): a81a093, every check passed, main is an ancestor of release-0.21.0. (5) TIMING: the build job asks the Pages API for the build type; unless it's 'workflow' it writes a notice, uploads nothing, and the deploy job is skipped, so main and a release's fast-forward stay green before the switch. Checked on main: run for 543b6b6 succeeded, it logged 'Pages build type: legacy', deploy skipped. Legacy Pages still serves main: /, install.sh, install.ps1, llms.txt, llms-full.txt, .claude-plugin/marketplace.json, docs/img/demo.gif and docs/img/inspect-findings.png all return 200 now. FOR THE USER: switch Settings > Pages > Source to GitHub Actions. Then I run pages.yml (workflow_dispatch) and check the page, the social card, the sitemap and each install address, including install.sh's SHA-256 against the release's SHA256SUMS. DEVIATIONS AND NOTES: (i) 'pinned by SHA like the other workflows' holds for release.yml and demo.yml; ci.yml and the mobile workflows pin by tag. (ii) docs/img/ is published whole, as the decision lists it, so its two .py generators are on the site too. (iii) No CHANGELOG line: main has no [Unreleased] section, and a line there would conflict with the release branch's. (iv) For the protocol: task next always takes the oldest queued task, and there is no take-by-slug. It took v0210-2 first; I put v0210-2 back to queued and took site-1 with a second task next. v0210-2 is queued again.
+```
+
+## 01M7ZSDACSRDFRVJ7951W4063Z
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.site-1`
+- scope: private
+- created: 2026-11-21T19:30:26Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.site-1","_mnemo.supersedes":"01M7ZQZWS7Y1SWK48TKGFJMJQM","area":"report","topic":"site-1"}`
+
+```text
+report.site-1 (worker-a, 2026-11-21): DONE. Supersedes the WAITING version; everything there still holds (PRs #171 a45ad31 and #172 543b6b6 into main, #173 a81a093 merging main into release-0.21.0). RECALL: found (decision.site-publish). AFTER THE USER'S SWITCH (the Pages API reports build_type workflow): I ran pages.yml by workflow_dispatch on main at 543b6b6 (run 44941111581). It succeeded: 'assemble the site' and 'deploy' both passed, it logged 'Pages build type: workflow', and deploy-pages reported success. LIVE CHECK (with a cache-busting query): all 10 published addresses return 200, each byte-identical to main's file: / (text/html), install.sh, install.ps1, llms.txt, llms-full.txt, .claude-plugin/marketplace.json (application/json), docs/img/demo.gif, docs/img/inspect-findings.png, sitemap.xml (application/xml), social-card.png (image/png). Files outside the list are no longer published: README.md, mnemo/Cargo.toml, site/sitemap.xml and CHANGELOG.md each return 404. The live page has the new title, the canonical link, og:image for social-card.png, twitter:card summary_large_image, and one JSON-LD block. INSTALL: the live install.sh is byte-identical to install.sh at the v0.20.2 tag, unchanged since. The release's SHA256SUMS lists only the five binaries, not the install scripts, so I checked the install itself: the live install.sh, run with HOME set to a scratch folder (the real ~/.local/bin untouched), downloaded mnemo 0.20.2 for aarch64-apple-darwin and checked its SHA-256 against SHA256SUMS. The installed binary's SHA-256 is 94751b68fe2aca414a1257366147f8ce4108f17cf7a760081d7f627862b02362, the same as SHA256SUMS' line, and it reports 'mnemo 0.20.2'. The attestation wasn't checked in that run: in the stripped test environment gh couldn't see its sign-in, so the script said 'checked the SHA-256 only'. Nothing was removed (the task's later step).
+```
+
+## 01M7ZVQPYW69NNRNZZ9Y0984MY
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.site-2`
+- scope: private
+- created: 2026-11-21T20:11:04Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.site-2","area":"report","topic":"site-2"}`
+
+```text
+report.site-2 (worker-a, 2026-11-21): DONE. RECALL: found (decision.site-publish, report.site-1). site/google83547f5159cbe150.html, as planner-a wrote it (53 bytes, one line, no trailing newline, SHA-256 ba665d4e...02bc), committed on its own into main through PR #174, squash-merged as fc8f8f4 'docs(site): Google Search Console verification file'; 22 checks passed. pages.yml run 44943078990 on fc8f8f4 succeeded ('assemble the site' and 'deploy' both passed). https://toarchkumar.github.io/mnemo/google83547f5159cbe150.html returns 200 text/html, 53 bytes, SHA-256 identical to main's file. main merged into release-0.21.0 with a merge commit through PR #175 (0632f8f), every check passed; main is still an ancestor of release-0.21.0. Done at a safe point in v0210-2: no v0210-2 changes were in the tree when I switched.
+```
+
 ## 01M7PF1C7HS3K4SW8C9GXQY9BS
 
 - type: episodic
@@ -3938,6 +4442,377 @@ report.v0202-6 (worker-a, 2026-11-20): WAITING for the user (step 1 done). RECAL
 report.v0202-6 (worker-a, 2026-11-20): DONE (updated after READ: v0202-6). STEP 1 as in the WAITING version: built release-0.20.2 at 45291426fe7d2ba0aa0af6e12060a7f3f2859da4 with --features keychain,embed-candle, installed by one atomic mv: mnemo 0.20.2, 10,948,400 bytes, mtime 2026-11-20T23:29:14-0800, SHA-256 f76910bf4562b011884b8b089e04138291a73b8b79cfc2c7828cabb598ee1939; the 0.20.1 release binary is kept as mnemo-0.20.1-release.bak in worker-a's scratchpad. AFTER READ (planner-a's note: servers 49437, 49457, 49477 on 0.20.2 from 23:43:34-23:43:47): the new CLI read the brain with no keychain dialog; my waiter restarted on 0.20.2 (the 0.20.1 one had exited 0 at 23:44:11 on the READ post). CHECKS on the real brain, each run: (1) get --key report.v0202-5: the table line starts '01M7YEDB8S6CGEQWFEWGVSFBG0  [episodic]  agent=cursor-agent  imp=0.80  report.v0202-5 ...'; its SHA-256 equals that of get 01M7YEDB8S6CGEQWFEWGVSFBG0 (53fb730c47fe both); --format json has no vector; get --key no.such-key exits 1 with 'key=no.such-key has no live version in that slot (`mnemo history --key no.such-key` shows its chain)'. MCP get with key fact.flake-pager-streamed-windows returned planner-a's live version (it supersedes mine), no vector. (2) essence render --project --ids: 2,033 bytes, sections decisions, state, open, next; 7 items, all 7 as '- [open] <26-char ULID> <text>'; no '+N more' line (fits whole). Three default renders hashed the same (85e5c0310734 x3). (3) recall --text 'install the release candidate keychain prompt' --thread claude-code:ac58fe13-1fb0-496d-bb51-b159c87e2361 --top-k 5: 5 hits, all _mnemo.kind turn and that thread, in 0.83 s; an unknown thread prints 'no results'. One of the top 3 is a saved <task-notification> turn (harness text in the transcript), noise rather than a bug of --thread. (4) stale: 21 rows, all 'unkeyed episodic' (the same 21 measured in v0202-4), oldest '2026-05-25: Started MNemo dogfooding ...' stale since 2026-06-24; nothing else stale; 0.05 s. (5) stats: the 16 fields of the MCP tool: memories 28057, deleted 0, dimensions 384, file_bytes 46776320, encrypted true, recall_mode exact_resident, index null, snapshot_count 115, snapshots_retained 115, wal_pages 17, cache_pages 256 of 256, agents [cursor-agent, default]. ROUGH EDGES (not wrong per spec, for the backlog): stats' table prints created_at and oldest_restorable_at as raw unix seconds and index/agents as JSON (null, an array); stats.memories 28057 counts coordination records (backlog 2), as about's header does not. Nothing else wrong.
 ```
 
+## 01M7YJ38D7AFFZJS1MWQ79QN6K
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-7`
+- scope: private
+- created: 2026-11-21T08:03:22Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795248567,"_mnemo.key":"report.v0202-7","_mnemo.superseded_by":"01M7YJECRK6KCVQGGTNG9S5CNX","area":"report","topic":"v0202-7"}`
+
+```text
+report.v0202-7 (worker-a, 2026-11-21): WAITING for the user's approval click. RECALL: the v0201-5 procedure (report.v0201-5; the backup procedure 01M7NBTP73WBC2SHVX5M4SE7WY). Woken by planner-a's brain post 'READ: v0202-7' (waiter exit 0 at 23:45:42; acked; restarted). DRY RUN: 44876865720 at f3def96 (mobile false) succeeded; since then only AGENTS.md, README.md and index.html changed (git diff --name-only f3def96 origin/release-0.20.2), so it wasn't run again. CI on 4529142 passed (CI 44878117654 after one rerun of a test flake, fact.flake-pager-streamed-windows; Mobile CI 44878117656). THE BACKUP: 6b47af0 'docs(brain): the brain's backup for v0.20.2, from the release candidate (v0202-7)', docs/brain.md alone, exported by the installed RC mnemo 0.20.2 (SHA-256 f76910bf...1939) with mnemo export --git -o docs/brain.md: 562 memories, 2 private records left out, header 'written by mnemo 0.20.2'. Diff read: 509 insertions, 11 deletions. Secret shapes, email addresses, home paths: none. Finding ids named: RB-016.2 (SECURITY, fixed in v0.20.0) and RB-016.4 (SECURITY, deferred; its 2 new mentions are worker-a's report text naming it by id only), plus RB-017.1, RB-018.2, REV-013.1 (not SECURITY). tests/brain_backup.rs: 2 passed. THE TAG: origin/main 618838d was an ancestor; main fast-forwarded 618838d..6b47af0; annotated tag v0.20.2 ('MNemo 0.20.2') on 6b47af0, pushed. RELEASE RUN 44881868646 (tag push, mobile false): 21 jobs succeeded, 2 skipped (mobile Swift and Android builds); it waits at 'approve the release (v0.20.2, mobile false)' since 00:03:00 local (2026-11-21) for the user's click.
+```
+
+## 01M7YJECRK6KCVQGGTNG9S5CNX
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-7`
+- scope: private
+- created: 2026-11-21T08:09:27Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-7","_mnemo.supersedes":"01M7YJ38D7AFFZJS1MWQ79QN6K","area":"report","topic":"v0202-7"}`
+
+```text
+report.v0202-7 (worker-a, 2026-11-21): DONE: v0.20.2 released (updated after READ: v0202-7). RECALL: the v0201-5 procedure (report.v0201-5; the backup procedure 01M7NBTP73WBC2SHVX5M4SE7WY). Woken by planner-a's brain post 'READ: v0202-7' (waiter exit 0 at 23:45:42; acked; restarted). DRY RUN: 44876865720 at f3def96 (mobile false) succeeded; since then only AGENTS.md, README.md and index.html changed (git diff --name-only f3def96 origin/release-0.20.2), so it wasn't run again. CI on 4529142 passed (CI 44878117654 after one rerun of a test flake, fact.flake-pager-streamed-windows; Mobile CI 44878117656). THE BACKUP: 6b47af0 'docs(brain): the brain's backup for v0.20.2, from the release candidate (v0202-7)', docs/brain.md alone, exported by the installed RC mnemo 0.20.2 (SHA-256 f76910bf...1939) with mnemo export --git -o docs/brain.md: 562 memories, 2 private records left out, header 'written by mnemo 0.20.2'. Diff read: 509 insertions, 11 deletions. Secret shapes, email addresses, home paths: none. Finding ids named: RB-016.2 (SECURITY, fixed in v0.20.0) and RB-016.4 (SECURITY, deferred; its 2 new mentions are worker-a's report text naming it by id only), plus RB-017.1, RB-018.2, REV-013.1 (not SECURITY). tests/brain_backup.rs: 2 passed. THE TAG: origin/main 618838d was an ancestor; main fast-forwarded 618838d..6b47af0; annotated tag v0.20.2 ('MNemo 0.20.2') on 6b47af0, pushed. RELEASE RUN 44881868646 (tag push, mobile false): 21 jobs succeeded, 2 skipped (mobile Swift and Android builds); it waited at 'approve the release (v0.20.2, mobile false)' from 00:03:00 local (2026-11-21). APPROVAL: GitHub's approvals API for run 44881868646: toarchkumar, approved, environment release. ATTEMPT 1 concluded failure at 00:05:31: 'publish to crates.io' (its step 'Publish core crate', cargo publish --no-verify) packaged mnemo-engine v0.20.2 (89 files, 2.5MiB) and got 'the remote server responded with an error (status 500 Internal Server Error)' from crates.io; 'engine published (gate)' failed with it. The Release, PyPI and attest had succeeded. crates.io's /api/v1/crates/mnemo-engine/0.20.2 returned 404 (not published; max_version 0.20.1). As the standing rule and RELEASING.md ('re-run the failed jobs') say, `gh run rerun 44881868646 --failed` at 00:06:57: ATTEMPT 2 succeeded at 00:07:49 (publish to crates.io and the gate success). Final: 29 jobs succeeded, 5 skipped (mobile, false). AFTER-TAG CHECKS, each from a command: crates.io mnemo-engine max_version 0.20.2 (version endpoint 200); PyPI mnemo-engine 0.20.2 with 6 files (the project JSON lagged at 0.20.1 for a minute; the 0.20.2 endpoint was 200); mnemo-swift newest tag 0.20.0 and Maven Central latest/release 0.20.0 (expected, mobile false). GitHub Release v0.20.2: not a draft, not a prerelease, 14 assets (5 CLI binaries, 5 wheels, sdist, SHA256SUMS, mnemo-v0.20.2.mcpb, server.json). MCP BUNDLE: server.json version 0.20.2; its fileSha256 equals the .mcpb's SHA-256 9a600b0674d88986aadcb7002d92d22131dce97337ef92c4e9ccb2450a479d8e. gh attestation verify (release.yml, refs/tags/v0.20.2) exited 0 for the aarch64-apple-darwin binary, the .mcpb and server.json. SITE: Pages built 6b47af0; install.sh, install.ps1, llms.txt, llms-full.txt byte-equal to main's; the page shows v0.20.2 and 39 tagged releases. INSTALL: the released mnemo-v0.20.2-aarch64-apple-darwin (matched SHA256SUMS) to ~/.local/bin/mnemo by one atomic mv: 'mnemo 0.20.2'; 10,948,912 bytes; mtime 2026-11-21T00:08:57-0800; SHA-256 94751b68fe2aca414a1257366147f8ce4108f17cf7a760081d7f627862b02362. The RC (f76910bf...) kept as mnemo-0.20.2-rc.bak in worker-a's scratchpad; this report, the task update and the post went through it (MNEMO_BIN), since the released binary's first brain read waits on the keychain dialog. The running servers and waiters keep the RC's inode until restarted. BRANCH: release-0.20.2 (an ancestor of origin/main) deleted on origin and locally, inside a tree:checkout claim; the tree is on main at 6b47af0, clean apart from .claude/. LEFT FOR THE USER: the keychain click for the released binary, the /mcp reconnects (planner-a then checks server start times against 00:08:57), the MCP registry publish (RELEASING.md's maintainer step), and, if wanted, `mnemo onboard --yes` in this repo for v0202-4o's allow rules. Supersedes the WAITING version.
+```
+
+## 01M7YJHZXRSC55MCJZ995YP5KD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-8h`
+- scope: private
+- created: 2026-11-21T08:11:24Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-8h","area":"report","topic":"v0202-8h"}`
+
+```text
+report.v0202-8h (worker-a, 2026-11-21): DONE. RECALL: the hand-off pattern (report.v0202-5h). Woken by planner-a's brain post 'READ: v0202-8h' (waiter exit 0 at 00:09:52; acked; the waiter restarted through the RC binary, since the released one waits on the keychain dialog until the user approves). claim who: no file: or tree: claims. The tree held docs/ideas.md alone modified (22 insertions; no home paths, emails or token shapes): the section 'One brain for many projects, and namespaces (2026-11-21)'. COMMIT 11bf85b 'docs(ideas): one brain for many projects, and namespaces (REV-016)', docs/ideas.md only, on branch v0202-8h-ideas from main at 6b47af0 (inside a tree:checkout claim); PR #168 into main, which reported no checks (docs/** is CI's paths-ignore) and was CLEAN and MERGEABLE; squash-merged as c080378 on main (branch deleted, inside a claim). The tree is on main at c080378, clean apart from .claude/. Brain writes for this task went through the RC binary (MNEMO_BIN), as the released 0.20.2's keychain approval is pending.
+```
+
+## 01M7YZE20Y0R1W686ZVMVKG8K9
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-1`
+- scope: private
+- created: 2026-11-21T11:56:27Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-1","area":"report","topic":"v0210-1"}`
+
+```text
+report.v0210-1 (worker-a, 2026-11-21): DONE. spec.v0210 step 1, the merge groundwork, merged into release-0.21.0 as 7f822d4 (PR 169, squash; CI 21 of 21 checks pass). No format change; mobile false. RECALL: partial. The task's opening recall was lost to a context compaction, so it was re-run: it returned spec.v0210 and decision.v0210-start, and no earlier facts on a clock or tombstones (new work). SPEC CHECK: the (checked) facts held where this step touches them: a delete was only a catalog flag (crud.rs delete); put_existing keeps ids and metadata, used by compaction (copy_live_into) and re-embed (copy_reembedded_into). One correction: the CLI 'import' writes through remember, so imported records get fresh stamps; only compaction and re-embed copy a stamp. BUILT: (a) _mnemo.hlc on every put (writes and in-place updates): max(now ms, the handle's largest stamp + 1, the record's own + 1); read_memory_meta raises the handle's largest from every record it decrypts; put_existing doesn't stamp. (b) delete() writes a tombstone: _mnemo.kind tombstone, _mnemo.tombstone_of, _mnemo.tombstone_key and _mnemo.tombstone_owner when keyed (the record is read for its slot), _mnemo.hlc past the deleted record's (when read: always for keyed and v8 records), _mnemo.deleted_at; empty content, shared scope, sentinel vector. That covers forget, essence remove, thread forget, prune_messages and Session::discard. A tombstone is a coordination kind (out of recall, BM25, ANN, about's list) of memory type working, the only coordination record of that type, so kind_counts counts it from the catalog (KindCounts::tombstones; Python kind_counts()['tombstones']). about's total (table and JSON) and export --git leave them out; the plain export shows them. Deleting a tombstone is refused; compaction keeps them. A repeat delete stays an Ok no-op and adds none. COST PER TOMBSTONE (measured, 384 dims, after compact_file, a temporary uncommitted test): 1,000 deletes 1,089.5 file bytes each (the facts deleted: 1,056.8 each); 5,000 deletes 1,074.8 (facts 1,038.7). The record is 184 bytes; the vector-column entry is 772 bytes (veccol::entry_len, 2 a dimension + 4), because every row carries the sentinel vector; the rest is the catalog row and page overhead. So a delete frees no file space net. Not done: skipping the vector entry for tombstones would change what a row means (an empty vector slot), so it's left for a decision. DEVIATIONS AND THINGS TO DECIDE: (1) Mnemo::len, stats().memories, verify and compact's before/after count tombstones, as they count messages and tasks (Python len(db) too); only about's counts and export --git leave them out. If len should leave them out, it's a one-line change. (2) A mass delete no longer shrinks the file until mnemo compact: the tombstones are written in the commit that frees the pages (which wait out quarantine), so they land at the tail. Freed pages are reused (tested). (3) Every record is bigger by its _mnemo.hlc; that changed how pages fill, and small_commits_append_catalog_deltas_and_reopen now starts at 6,000 rows. (4) An engine fix the change exposed: apply_retention's extra left out the old free-list run and a rewritten key-slot run; retained snapshots pinned 129 pages against a cap of 128 in retention_bounds_pinned_space_under_churn. Both are now counted (flush.rs). (5) Naming: the code already calls deleted catalog rows tombstones (Stats.deleted, compact_tombstones); the new record kind shares the word. TESTS: new tests/merge_groundwork.rs (4) and export_cli git_and_about_leave_out_a_deletes_tombstone; counts updated in fmt9_skeleton, fmt9b_column, fmt9c_commit, fmt9d_bm25, fsync_merge, integration, test_mnemo.py; proptest models leave tombstones out. Local full suite (failpoints, no-fail-fast): 851 passed, 0 failed, 1 ignored, before the last two test additions (which pass alone: merge_groundwork 4, export_cli 10). mnemo-uniffi tests pass; python test_mnemo.py (dev-hooks, embed-candle) all passed; clippy -D warnings and fmt clean. MUTATIONS: 8 of 9 caught (no tombstone; deletable tombstone; counted as coordination; git export keeps them; about's total counts them; reads don't raise the clock; copies restamped; retention without the free run). Not caught: dropping the record's own stamp + 1 in next_hlc, because every path reads the record before rewriting it, which already raises the clock; kept as a backstop. Docs: CHANGELOG [Unreleased] Added, Changed, Fixed; mnemo/README.md about, export and compact rows; mnemo-python README. Not done here: a seed.json memory (with the merge surfaces, step 3).
+```
+
+## 01M7ZNKDD8MZCYZF84PNVR5RZX
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-1b`
+- scope: private
+- created: 2026-11-21T18:23:51Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-1b","area":"report","topic":"v0210-1b"}`
+
+```text
+report.v0210-1b (worker-a, 2026-11-21): DONE. spec.v0210 rev 2 step 1b, (a) to (f), PR #170 squash-merged as a023a62 on release-0.21.0, CI 21 of 21 pass. RECALL: partial (spec.v0210 rev 2 and report.v0210-1 found; nothing on 1b beyond the spec). SPEC CHECK: the fact that the legacy coordination scan looks only at episodic fact rows was true at 7f822d4 (coordination.rs legacy_coordination_ids). BUILT: (a) a turn's tombstone holds _mnemo.tombstone_thread and _mnemo.tombstone_turn; delete reads a turn row for them; thread_forget passes the record it already read (one decrypt per turn, as before). (b) the RB-013.1 scan also checks working fact rows with the sentinel vector; kind_counts uses it, so it counts a re-tagged tombstone or coordination record as what it is. (c) prune_messages leaves no tombstone (shared path delete_inner(id, known, marker)). (d) the manifest gets _mnemo.hlc_since once, at the first commit that stamps a write, found by its onboarding row (nothing else decrypted); a keyed manifest rewrite gets the earliest value an older version held. (e) dev-hooks __set_hlc_offset_for_testing(ms), __freeze_hlc_clock_for_testing(Some(ms)) and MNEMO_DEV_HLC_OFFSET_MS. (f) next_hlc goes past any stamp (saturating adds); Mnemo::clock_lead_ms(); past HLC_AHEAD_NOTICE_MS (1 day) the next write adds one notice to notices(); the CLI's write commands flush through flush_noting(), which prints new notices once on stderr. Docs: CHANGELOG (Added, Changed), the guide's new Forgetting section (a delete doesn't make the file smaller; compact keeps tombstones), llms-full.txt and the plugin skill regenerated, README compact and inbox --prune rows. TESTS: full suite cargo test --features failpoints --no-fail-fast 861 passed, 0 failed, 1 ignored; merge_groundwork 11 (7 new, 1 rewritten); v0_18_compat an_older_builds_compact_hides_no_tombstone passes against the published v0.18.1, run here and in CI (3 tombstones found and counted after its compact, kind_counts unchanged, out of recall, re-tagged by a v0.21 compaction); Python test_mnemo.py all pass; mnemo-uniffi 25 passed, 1 ignored; clippy clean with CI features. Mutation checks: 13 of 13 caught. DEVIATIONS: (1) Mnemo::kind_counts is now &mut self -> Result<KindCounts> (it needs the legacy scan); Rust API change in CHANGELOG, Python unchanged. (2) The spec asks for an offset; I added a frozen clock too, since an offset alone can't make two handles stamp one millisecond reliably. (3) The clock-ahead notice fires only for stamps the handle has read or written; a fresh handle that reads nothing sees no lead. NOTES FOR THE PLANNER: (i) the essence open item says message prunes write tombstones; since 1b they don't, so a message pruned sooner than the 30-day keep time can come back in a merge from a copy that still holds it (said in prune_messages' docs and the CHANGELOG). (ii) hlc_since is conservative: a file that gets its manifest after v0.21 stamps were written records a later first stamp; a deleted (not superseded) manifest loses it, and the next one gets that handle's first stamp. Both make a merge say fewer deletes are known, never more. (iii) The first v0.21 write to the project brain at the RC install will add hlc_since to its manifest (one in-place update).
+```
+
+## 01M7ZVWFJHN0EEF2Z39VRJ03KJ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-2`
+- scope: private
+- created: 2026-11-21T20:13:40Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795306338,"_mnemo.key":"report.v0210-2","_mnemo.superseded_by":"01M809HE67VZW3P25FRKYPE0PB","area":"report","topic":"v0210-2"}`
+
+```text
+report.v0210-2 (worker-a, 2026-11-21): BLOCKED on a spec question; most of the step is built. RECALL: found (spec.v0210 rev 2, decision.v0210-merge-rules, RB-019.2 to .6 and .8, report.v0210-1b). BUILT (branch v0210-2, commit f4a86cc, pushed, no PR): src/store/merge.rs, Mnemo::merge_files(a, secret, b, secret, out, &MergeOptions) -> MergeReport, plus a pure merge_core that takes now_ms as a parameter so tests can fix it. It implements identity (salt or manifest ULID), the refusals, output like compaction (new data key, temp file then hard_link, so nothing is overwritten), the engine's cache entries only, and rules (0) to (4). Types are in store/mod.rs (MergeSecret, MergeOptions, MergeReport, MergeSide, MergeKeptKey, MergeRename). New keys: _mnemo.merge_conflict, _mnemo.merge_source, _mnemo.merge_name (the original name of a renamed task or finding). history_in now stops at a missing id, as at a deleted row: before, a compacted file whose key had a deleted middle version made history_in error. TESTS: tests/merge.rs, 11 of 12 pass: writes on both sides; edits on both sides (newer wins, conflict copy); a key both wrote (one chain, the superseded side flagged); same value (no conflict); forget against edit; a deleted key against a new version (kept, reported); done is final and two tasks under one slug are both kept (-merge-2); essence resolved on one side; refusals; inputs' bytes unchanged; a rekeyed copy with its own secret. Each checks merge(a,b)=merge(b,a) through files, a mirrored report, and merge(merge(a,b),x)=merge(a,b). tests/proptest_merge.rs: prop_two_copies passes 24 cases (commutativity, mirrored report, idempotence, merge(x,x)=x, coverage, no deleted record survives). prop_three_copies fails. THE QUESTION (evidence: tests/merge.rs an_edit_on_one_side_only_is_no_conflict fails with conflicts {fact:1}; prop_three_copies' minimal case: a edits then resolves an essence item, c makes the same edit, b untouched). The rules compare two versions of one id with no common ancestor, so an untouched record and a concurrent edit look the same. Under spec rule (3), an edit made in one copy only, against the untouched version in the other, makes a conflict copy of the old text. That's the most common merge case, so nearly every edit would leave a conflict in about. For essence items and tasks, 'text and status both differ' against the untouched version flags them, and the flag depends on the grouping, so merge(merge(a,b),c) differs from merge(a,merge(b,c)). Key slots are fine: new versions are new ids. OPTIONS: (A, recommended) each in-place rewrite records the stamps the record had before, the 8 largest, in _mnemo.hlc_prev (written by put; no format change; up to about 80 bytes on an updated record). The merge treats x as an ancestor of y when x's stamp is y's or in y's list: the descendant wins, with no copy and no flag. A version from an older build, or one more than 8 edits back, still gets a conflict copy, which is conservative. A merged record's list is the 8 largest of both inputs' lists and stamps, which is associative. This changes step 1's code. (B) no new field: guess the divergence point from the records identical in both inputs, and treat a version stamped at or before it as untouched. It depends on the clocks: a skewed copy's real edit can be lost with no trace, and associativity isn't sure. (C) the spec as written: every one-sided edit is a conflict. ALSO: the spec's rules for tasks and essence say 'other fields from the larger number'; with (A), a one-sided move or edit simply wins. NEXT after a decision: the ancestry rule, the rest of the spec's cases (equal stamps, a copy an hour ahead, merge(x,x) with deletes, re-created id, expired and pruned; a forget checked through every read; the v0.20.2 fixtures; two findings with one id; an after-cycle; a failpoint mid-merge; the wrapped key differing; stamps past both inputs), docs and CHANGELOG.
+```
+
+## 01M809HE67VZW3P25FRKYPE0PB
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-2`
+- scope: private
+- created: 2026-11-22T00:12:18Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795389396,"_mnemo.key":"report.v0210-2","_mnemo.superseded_by":"01M82RR5Q59P64ZJBPGXAADF2K","_mnemo.supersedes":"01M7ZVWFJHN0EEF2Z39VRJ03KJ","area":"report","status":"blocked","topic":"v0210-2"}`
+
+```text
+BLOCKED: v0210-2 (second block; decision.v0210-ancestry is in). Recall: found (spec.v0210, decision.v0210-merge-rules, decision.v0210-ancestry, the earlier report.v0210-2).
+
+DONE SINCE THE ANCESTRY DECISION (branch v0210-2, pushed, head d3c1c86, no PR yet): 1f69a77 ancestry by (stamp, version hash) pairs; 98a6f67 the spec's remaining cases; 09847f3 the v0.20.2 fixtures; 34e245c docs (CHANGELOG, crate README), the last scenario tests, and a catch-up test fix; d3c1c86 (WIP) fixes and tests below. Deviation from the decision text, already in: _mnemo.hlc_prev lists [stamp, _mnemo.ver] pairs, not bare stamps (two copies can stamp one ms), and a version a merge made is marked VER_MERGED (bit 62) and never listed. MergeReport.merged counts no claims or presence.
+
+Full suite (cargo test --features failpoints --no-fail-fast, before d3c1c86): 893 passed, 1 failed, 2 ignored. The failure was catch_up::the_index_follows: a catalog base fell on a step that must catch up incrementally, because where a base falls depends on record sizes (base branch: 5 full reloads in that test, this branch 6, measured). The test now writes until a base falls before those steps; it passes on this branch and on release-0.21.0.
+
+Mutation checks: 23 mutations of merge.rs/records.rs, 18 killed by the tests at 34e245c; 5 survived (stamp-only ancestry, copies kept after their source is forgotten, keep_flag off, merged versions listed, merged_prev off). d3c1c86 adds 5 tests, and each of the 5 is now killed. tests/merge.rs: 32 pass; merge_groundwork 12; merge_v0_20_2 4.
+
+Associativity bugs the mutation runs' proptest seeds found, fixed in d3c1c86 (the last is a new rule; please accept or reject): (1) two copies with one source and one text share a copy id, and the first one seen was kept: they now resolve like two versions; (2) the last tie-break compared bytes that include _mnemo.hlc_prev, which an earlier merge changes: it now compares the version without _mnemo.ver and _mnemo.hlc_prev; (3) a copy kept its source's _mnemo.hlc_prev, which differs by grouping: copies carry none; (4) NEW RULE: a copy whose text equals the text its source ends with is dropped when the merge resolved that source (a and b edit in one ms to '3' and '0', c writes '0' later: (a+b)+c kept a copy of '0' beside the winner '0'; a+(b+c) made none).
+
+WHY BLOCKED: the essence rule in decision.v0210-merge-rules ('when text and status both differ, stamp _mnemo.merge_conflict') is pairwise and not associative, and spec.v0210 requires prop_three_copies. Evidence: prop_three_copies at 512 cases failed after 245 successes; seed 083bdc4a in tests/proptest_merge.proptest-regressions (committed, so the proptest fails on the branch): a edits the item to 'take 0', b to 'take 2', c resolves it then edits it to 'take 2', all in the same ms. a+(b+c): b and c have one text, so no flag; a's 'take 0' (open) against the resolved 'take 2' differs in both, so flagged. (a+b)+c: a and b differ in text only, so no flag; then 'take 2' against 'take 2', no flag. Tasks and findings use the same condition (merge.rs lines 381 and 429), not yet hit.
+
+A second gap the proptest doesn't model: inputs where one descends from another's version (a copy of a copy). Measured with a scratch test: x edits a fact to 'text p'; y, copied from x, edits it to 'text q'; z, from the base, writes 'text q'. (x+z)+y keeps a conflict copy of 'text p'; x+(z+y) keeps none. Sticky flags have the same exposure. Nothing is lost either way; the extra copy or flag is conservative.
+
+OPTIONS. A (recommended): flags and copies follow the versions that conflicted. Essence, task and finding flags set when concurrent texts differ (no status condition); a copy (which keeps its source's [stamp, ver]) is dropped when the winner descends from that version; a flag records the conflicting versions in a new reserved key and goes when the winner descends from all of them; the proptest gets a fourth input copied from another after its ops. The laws then hold for copies of copies too. B: only the text condition for flags, plus fix (4); document that copies of copies merged in different orders may keep an extra conflict copy or flag (never a loss). Smaller, and the proptest passes as it is. C: keep the spec's essence rule and compare the three-copy outputs without flags. Not recommended: the CHANGELOG and README say three copies merge to the same records.
+
+NEXT ON A DECISION: the chosen option, a full suite run, the mutation script again, the PR into release-0.21.0, report DONE.
+```
+
+## 01M82RR5Q59P64ZJBPGXAADF2K
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-2`
+- scope: private
+- created: 2026-11-22T23:16:36Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795421515,"_mnemo.key":"report.v0210-2","_mnemo.superseded_by":"01M83QCBQ4VWK4WCG1YPXRWSB3","_mnemo.supersedes":"01M809HE67VZW3P25FRKYPE0PB","area":"report","topic":"v0210-2"}`
+
+```text
+report.v0210-2 (worker-a, 2026-11-22): BLOCKED again, on one design question. Recall: found (report.v0210-2, decision.v0210-ancestry, decision.v0210-conflict-flags).
+
+Done since the last report: the property tests at 2,048 cases (the config runs 24; the earlier final check ran 512) found 8 new failing seeds. Seven are fixed, each with a fixed test, in WIP commit 8524c3f on branch v0210-2 (pushed; no PR):
+(1) A version a merge left out stays next to the one before it; a chain that ended at a forgotten live version stays ended, unless an input wrote a version after the one before it (seeds ed02c21, 32adae7).
+(2) A slot's branches are ordered by the stamp each version was first written with (the least of _mnemo.hlc and its hlc_prev stamps). A supersede restamps the old version, so ordering by the current stamp differed between groupings (e61eac0).
+(3) A fact a merge only relinked or flagged (VER_MERGED, no merge_heads) counts as the write it holds, so a later edit of that write covers it. When one side covers the other, the covered side's flag goes too (decision.v0210-conflict-flags (2)).
+(4) The slot's live version carries no conflict flag; one flagged for losing to a version that was later deleted is unflagged (0d4571f).
+(5) records.rs put: a stamp is never before the write's own _mnemo.updated_at. On a real clock this already holds; the tests' frozen clock broke it, and an earlier text could beat its own edit (e424a42).
+(6) A concurrent merge takes the later updated_at of the two (f787fd6).
+(7) MergeReport.kept_keys in key order, so merge(a,b) and merge(b,a) report alike (364a48e).
+Docs: CHANGELOG and mnemo/README.md describe (1), (2), (4) and (5).
+
+Blocked on seed 91d13c7 (prop_a_copy_of_a_copy). a and c each write key k2 alone (same text); d, copied from a, writes D over a's A and forgets D. c+d: A's chain ends at D and c's C stays a lone head (rule (1)). a+c: the two lone heads become one chain, A then C ('a key slot becomes one chain'). Merging that with d, nothing in the output says the link A to C was made by a merge, not a write, so it beats d's ended chain. ((a+b)+c)+d gives A superseded by C; a+(b+(c+d)) gives A superseded by D, with C a lone head. Associativity needs one rule for links a merge made versus links a write made. That choice changes what a slot's chain means, so it's the Planner's.
+
+Options:
+A (recommended): a merge marks each version whose supersedes link it made (one new reserved key, e.g. _mnemo.merge_linked; put strips it on a new write). Each merge orders a slot from write-made links and first-written stamps only, so the chain is a function of what was written. That makes it associative by construction and settles ended chains in one place. Cost: a reserved key, a rework of relink_slots, and another 2,048-case pass.
+B: a forgotten live version never ends a chain in a merge. merge(x,x)=x then needs the engine's write path to link a version written after a forgotten head to it (remember_keyed). Files written before that change would be relinked by a merge.
+C: document the case (three or more copies, where one forgets a key's live version while another writes the key), and keep it out of the property tests.
+
+State: merge.rs 48 tests pass (39 at 0cbc7ee); merge_v0_20_2 12 pass; merge_groundwork 4 pass, 1 ignored; proptest_merge 2 of 3 pass with the 20 saved seeds (6 at 0cbc7ee), prop_a_copy_of_a_copy fails on 91d13c7. clippy (with and without failpoints) and fmt clean. Not run on 8524c3f: the full suite (the last one, on uncommitted work before this round, had 909 passed, 3 failed, 2 ignored: the three proptests on these seeds), and the full mutation run (the script now has 46 mutations; the last full run killed 37 of 37; of the 9 new ones only 'update time from the winning body' was run alone). Its kill depends on timing: once by its fixed test, once only by the failing seed. Also: tests/merge.rs one_text_written_in_two_copies_in_one_millisecond... asserted the winning text, which is a tie-break of status-history bytes; the assertion now checks only the status.
+```
+
+## 01M83QCBQ4VWK4WCG1YPXRWSB3
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-2`
+- scope: private
+- created: 2026-11-23T08:11:55Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-2","_mnemo.supersedes":"01M82RR5Q59P64ZJBPGXAADF2K","area":"report","topic":"v0210-2"}`
+
+```text
+report.v0210-2 (worker-a, 2026-11-23): DONE. PR #176 squash-merged into release-0.21.0 as 5a62405; CI 27 of 27 checks pass on 72587ec. Recall: found (report.v0210-2, decision.v0210-chain-rule, decision.v0210-conflict-flags, decision.v0210-ancestry, the REV-017.1 notes on the task).
+
+Commits on the branch: f4a86cc, 1f69a77, 98a6f67, 09847f3, 34e245c, d3c1c86, d78d169, 0cbc7ee, 8524c3f (earlier rounds), 3e17b88 (round 4: decision.v0210-chain-rule option A, REV-017.1 (A) and (B)), 72587ec (Windows test fix).
+
+Checks run locally on 3e17b88's code: proptest_merge at PROPTEST_CASES=2048, all 3 properties pass, and the 25 saved seeds pass; cargo test --features failpoints --no-fail-fast: 927 passed, 0 failed, 2 ignored, 85 test binaries (tests/merge.rs 58, merge_v0_20_2 12, merge_groundwork 4 with 1 ignored); cargo clippy --all-targets -D warnings with and without failpoints clean; cargo fmt --check clean. Mutation run: 56 mutations, 53 killed.
+
+Deviations:
+(1) Mutations: 56, not the decision's 46. Patterns for code round 4 removed were replaced, and the round's new rules got their own. 3 survive, each changing code no write can reach: the first_hlc fallback's fold over _mnemo.hlc_prev (only this build writes _mnemo.ver, which hlc_prev needs, and it sets first_hlc on every new record); keep_flag for a covered fact (only a merge sets a fact's flag, no write removes _mnemo.* keys, so the covering version already carries it; keyed facts' flags are recomputed from the chain); put stripping _mnemo.merge_linked from a new record (caller metadata may not carry _mnemo.* keys on a new record, RB-001.24, and update rewrites in place). The Planner decides whether these stand.
+(2) New reserved keys: _mnemo.first_hlc (26 bytes per new record, measured with rmp_serde), set once by put; _mnemo.merge_linked holds the written-over id (or null), not a boolean; _mnemo.tombstone_supersedes on a keyed record's tombstone. put strips merge_linked only on a new record; a rewrite in place keeps it.
+(3) Two bugs found while checking a surviving mutation, fixed in 3e17b88 with tests: a task or finding a merge renamed, whose rival is gone, takes its name back and its flag is recomputed from its heads (before, merge(out, input) dropped the flag, breaking merge(merge(a,b),x)=merge(a,b)); a thread's forget takes every copy of its turns saved before it, in any input, and only turns an input holds beside the tombstone stay (seed 6e5fb2a2: two groupings kept different copies).
+(4) The report's key conflict counts a key only when this merge flags a version anew.
+(5) 72587ec: claims_come_from_the_first_input_only named its output claims-tree:a.mnemo, which Windows refuses; the merge tests first ran on Windows in this PR.
+Carried from earlier rounds: heads as triples with a text hash; a covering side wins whole; the stamp is never below updated_at x 1000; a concurrent merge keeps the later updated_at; kept_keys sorted by (owner, key, side).
+
+Root README.md and index.html have uncommitted planner-a edits; left unstaged. Next: the CLI command step of spec.v0210, on the Planner's READ.
+```
+
+## 01M840FP0QAWNZPY0E72028WTX
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-3`
+- scope: private
+- created: 2026-11-23T10:51:01Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-3","area":"decision","topic":"v0210-3"}`
+
+```text
+REPORT v0210-3 (spec.v0210 rev 2 STEP 3, 2026-11-23): DONE. Recall at start: found (spec.v0210, decision.v0210-merge-rules, report.v0210-2). Hand-offs committed first, on release-0.21.0: 9dfd95b (docs/design/inspect-refresh mockups) and 43969c9 (README.md, index.html). Code: commit 5ef98a6 on branch v0210-3, PR #177 into release-0.21.0 (18 files, +808 -11), squash-merged as 2ed02e3. What it adds: mnemo merge <a> <b> -o <out> (table, or --format json with the ids; a copy's clock more than an hour ahead is a stderr warning; a refusal exits 1 with the reason and leaves no output); Mnemo::merge_conflicts and is_merge_conflict; about counts flagged records (table line, stats.merge_conflicts in JSON); inspect tags them, filters them (conflict=yes) and counts them on its about tab; the guide's 'Merge two copies' section with a tested sh block; llms-full.txt regenerated (llms.txt unchanged); Python merge_files returning the report as a dict; README CLI table, Python README, AGENTS.md task-table row, seed.json memory (48th), CHANGELOG. No MCP tool. Tests (local): cargo test --features failpoints --no-fail-fast 931 passed, 0 failed, 2 ignored across 86 binaries (tests/merge_cli.rs 3 new, tests/inspect_cli.rs 12 with 1 new, tests/guide.rs 5); clippy -D warnings with and without failpoints clean; fmt clean; mnemo-python fmt and clippy clean; Python test_merge_files passes run alone. CI: PR #177 22 checks passed, 1 skipped (deploy, the Pages deploy, skipped on a PR), no re-runs. Deviations: (1) the guide test sandbox PATH gains cp, for the guide's merge example. (2) The second copy's secret: --b-passphrase/--b-key-file, else the key store entry for its salt, else the first copy's secret; if the first copy's secret came from a flag and the second has none, the second uses the same. (3) about now scans every live non-turn record to count merge flags (one pass over the catalog). (4) Mnemo::merge_conflicts and is_merge_conflict were added to the library (pub) so the CLI, inspect and tests share one rule. (5) On this Mac the full test_mnemo.py stops at test_index_and_snapshots (assert db.has_index()), the same on the unchanged base 43969c9 wheel; not from this change, CI's Linux job runs the whole script.
+```
+
+## 01M8490ZCA0YC5C87BZ6JTD8RF
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-3b`
+- scope: private
+- created: 2026-11-23T13:20:16Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-3b","area":"decision","topic":"v0210-3b"}`
+
+```text
+REPORT v0210-3b (REV-017.2 (1)-(3), REV-017.1 (C), 2026-11-23): DONE. Recall at start: found (report.v0210-2, report.v0210-3, spec.v0210, decision.v0210-merge-rules); findings read with mnemo finding get. Queue note: task next handed out v0210-4 first (oldest by order); I set it back to queued untouched with a note, then took v0210-3b. Code: commit ae229b9 on branch v0210-3b, PR #178 into release-0.21.0 (7 files, +705 -123), squash-merged as 5b0a1d6. (1) records move by value through the delete rule into the output; each input keeps its own copy only of keyed facts, tasks, findings and records the inputs hold differently, plus summaries (ids, supersession marks, written_over). (2) wins compares numbers first, hashes only on a tie; same_record (field by field, floats by bits) recognises the same record before any encoding; name_final_versions skips records placed and never changed; a key's flag check no longer hashes a version against itself. (3) kept_keys from an index of the other input's keyed records by (owner, key); gone_after from an index; also a third per-tombstone scan (a forgotten turn's copies) now from an index of the input's turns. (4) merge_files: when hard_link fails as unsupported or not permitted (ErrorKind Unsupported/PermissionDenied, or ENOTSUP/EOPNOTSUPP, Windows 1/50), File create_new (owner-only on Unix) then copy and fsync; on a failed copy the file it made is removed; a file that appeared meanwhile is left alone and the merge is refused 'already exists'. Tested through a dev-hooks hook (__merge_without_hard_links_for_testing: no-links, taken, copy-fails) in tests/merge.rs without_hard_links_the_output_is_a_copy_that_never_overwrites. I found no better way than the planner's fallback: std has no non-overwriting rename and the crate forbids unsafe. Numbers (this Mac, release builds, before 2ed02e3, after this branch; examples/merge_bench.rs pairs with edits, keyed rewrites/deletes, kept keys, 100 concurrent fact edits and 100 concurrent key writes): mnemo merge 10,000 records: before 0.62-0.68s 232-235 MB peak RSS, after 0.25-0.27s 112-116 MB; 100,000 records: before 8.66-9.15s 2,183-2,190 MB, after 1.98-2.02s 983-988 MB. Rules alone (merge_bench time): 10,000: 0.43-0.44s -> 0.07s; 100,000: 7.06-7.69s -> 0.49-0.51s. Output unchanged: sorted mnemo export --format jsonl of the merged files byte-identical before/after at both sizes (10,741 and 102,901 records); reports equal less lead_ms and out. Tests: PROPTEST_CASES=2048 proptest_merge 3 passed, no seed saved; cargo test --features failpoints --no-fail-fast 932 passed, 0 failed, 2 ignored across 86 binaries; tests/merge.rs 59 (one new), rerun after renaming the hook enum's variants for clippy; clippy -D warnings with and without failpoints clean; fmt clean. CI: PR #178 27 of 27 checks passed, no re-runs. Deviations: (a) a third quadratic scan (turn tombstones x records, saved_again) indexed too, beyond the finding's two. (b) examples/merge_bench.rs added (for v0210-4 too) and put in Cargo.toml exclude since it uses a dev-hooks function; examples/perf2_split.rs and shared_bench.rs also use dev-hooks functions and are still packaged (pre-existing, not changed). (c) The rules-only example built at the base read the inputs slower (0.93-1.22s per input vs 0.25-0.48s) though the read code is unchanged; unexplained, and the mnemo merge numbers include whatever it is. (d) Peak RSS at 100K is still ~985 MB: both inputs are loaded whole (memories()), which this task didn't change; streaming the inputs would be the next step if v0210-4 needs it.
+```
+
+## 01M849CP1T7V9CK6N5C02SZVVX
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-4`
+- scope: private
+- created: 2026-11-23T13:26:40Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-4","area":"decision","topic":"v0210-4"}`
+
+```text
+REPORT v0210-4 (spec.v0210 STEP 4, dogfood merge on copies of the project brain, 2026-11-23): DONE, with one finding for the Planner (task status, below). Recall at start: found (status.dogfood-split, status.dogfood-gaps, report.v0210-2, spec.v0210 step 4 via mnemo get --key spec.v0210). No commits or PR: no code changed. Builds: installed mnemo 0.20.2 for the copies' writes; branch build = release-0.21.0 at 5b0a1d6, release profile (it still prints 0.20.2, the version isn't bumped yet). Setup: .git/mnemo/project.mnemo copied twice into a scratch folder (59,531,264 bytes, 35,178 records each; installed `mnemo verify` passed on both). Both copies rekeyed with the installed CLI to throwaway passphrases (plain rekey, no --store: nothing written to the key store), so the branch build opened them with flags and never read the keychain. Diverging writes (installed 0.20.2, the copies only): laptop: an unkeyed fact; key dogfood.v0210-4.shared; importance 0.31 on 01M80ZWP25CQRWN6WCTBEFFDTA (decision.inspect-refresh); a project essence item added; essence item 01M7ZW0SRY09RBX1FWX0CHGN3Z resolved; task v0210-4 moved to blocked; thread claude-code:6aee6c37-... forgotten (10 turns). desktop: an unkeyed fact; the same key with other text; importance 0.72 on the same fact; a project essence item added; the same essence item's text updated; a note on task v0210-4. Inputs after: 59,580,619 bytes each. Merge (branch build, laptop first): 3 runs 0.81-0.83s, peak RSS 375 MB each; output 46,391,296 bytes (one snapshot; the inputs had 148). Report: 35,077 records merged (35,175 in about; the other 98 are claims and presence, which the report doesn't count), laptop only 3, desktop only 3, both 35,168, removed 10 (the forgotten thread's turns, from 0.20.2's deleted rows), dropped 0, kept_keys 0, renamed 0, after cycles 0, lead_ms -9,540 and -8,540, hlc_since none for both (no v0.21 write on either; the note says so). Every conflict (3, all as the rules say): (1) essence 01M7ZW0SRY09RBX1FWX0CHGN3Z: resolved (laptop) wins, with desktop's text, flagged. (2) fact 01M80ZWP25CQRWN6WCTBEFFDTA: the later edit (desktop, importance 0.72) stays, and conflict copy 01M80ZWP25CE65TPTFV0DTYHDS holds laptop's 0.31, flagged. (3) key dogfood.v0210-4.shared: one chain, desktop's 01M8499E30WC423X2S1H59N1QN live and laptop's 01M8499D1F5DF60FFVB0MYZGHY superseded and flagged. Output opened with the branch build: about shows 35,175 memories (512 facts, 34,253 turns, 49 essence, 361 coordination, 1 snapshot) and '# 3 records flagged by a merge as in conflict' (stats.merge_conflicts 3); essence render --project shows both new items and the resolved item; history --key shows the chain; recall 'dogfood v0210-4 shared key' --no-track returns desktop's key version first, then both copies' unkeyed facts (0.03s, 33 MB). FINDING (task status): laptop moved v0210-4 active->blocked at 13:24:53Z and desktop only added a note at 13:24:54Z, which 0.20.2 records as a history entry active->active. The merged task is active with both entries in its history and no flag: the status rule takes the last history entry's 'to', so a later note on one copy undoes a status move on the other. Suggest: take the status from the last entry that changed it (from != to), or flag the task when the two copies end on different statuses. Not changed here; the Planner decides. about timing (task note), on the laptop copy before its writes, 3 runs each: installed 0.20.2 0.16-0.17s, 142 MB; branch 0.16s, 138-140 MB. The branch's scan for merge flags doesn't show at this size (507 facts, 47 essence, 361 coordination records). Aside (pre-existing, both builds): about's order among onboarding entries with equal importance and equal created_at second ([access], [checklist], [mission], all 1.0 at 1794779117) varies from run to run (6 runs: 4 orders with 0.20.2, 4 with the branch); the sort (store/recall.rs about_in) has no tie-break after created_at. Suggest: then id. 100K pair (examples/merge_bench.rs, two copies of 100,000 records, inputs 115,564,544 and 115,589,120 bytes) with the branch build: 3 runs 2.00-2.61s, 984-988 MB peak RSS; output 115,310,592 bytes, 102,901 records; its export is identical to the pre-v0210-3b build's. Cleanup: the copies, the merged outputs and the 10K/100K pairs deleted. The live brain was only copied (cp), never opened by the branch build.
+```
+
+## 01M84J7X20SMVCSBM50HKZSC79
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-4b`
+- scope: private
+- created: 2026-11-23T16:01:20Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-4b","area":"decision","commit":"95db7ff","pr":179,"topic":"v0210-4b"}`
+
+```text
+REPORT v0210-4b (2026-11-23): DONE. Recall at start: found (decision.v0210-task-status, report.v0210-4). Code: commit ab81772 on branch v0210-4b, PR #179 into release-0.21.0 (9 files, +264 -17), squash-merged as 95db7ff. (1) decision.v0210-task-status: a merged task's or finding's status comes from its last change; a note (from == to) never sets it. An input that changed the status since the copies diverged (an entry the other doesn't hold) keeps its own status; when both did, the later change's input wins, and if they ended on different statuses the record is flagged and marked _mnemo.merge_status_conflict (new const MNEMO_META_MERGE_STATUS_CONFLICT, re-exported), which keeps the flag through later merges until a new write (put with stamp) drops it. Findings use the same rule. (2) about_in breaks ties after importance and created_at by id. CHANGELOG updated. Tests: tests/merge.rs +2 (a_note_on_one_copy_never_undoes_a_move_on_the_other, both ways round; two_moves_to_different_statuses_flag_the_task_and_the_later_wins: different and same statuses, a new write, a merge again), 61 pass; tests/proptest_merge.rs +2 ops (TaskBlock, TaskNote); PROPTEST_CASES=2048: 3 passed in 636.45s, no seed saved; tests/suites/integration.rs +1 (about_keeps_one_order_for_entries_tied_on_importance_and_time), failed before the fix, passes after. Local: fmt clean; clippy -D warnings clean with and without failpoints; cargo test --features failpoints --no-fail-fast 935 passed, 0 failed, 2 ignored. CI: 21/21 green after one rerun of rust (windows-latest). Deviations: (a) each input's own status is used, not the merged history's last entry, since history `at` is in seconds and the union can't order two entries in one second (a take and a move in one second came back active); (b) the mark key _mnemo.merge_status_conflict is new; (c) the owner rule is unchanged; (d) the saved proptest seeds still run but replay different cases, because the strategy's arms changed; (e) task_add writes no history entry, so the tests' history counts are 3, not 4. FOR THE PLANNER, a pre-existing merge bug (not in this PR, from v0210-2 5a62405): rust (windows-latest) first failed tests/merge.rs a_chain_closes_up_around_a_version_another_copy_deleted (60 passed, 1 failed; run 45205853467, job 137801272711): merge(a, merge(b, d)) and merge(merge(a,b), d) gave the base version _mnemo.invalid_at 1795448329 vs 1795448328 (and so different _mnemo.ver). Cause: keyed.rs:233 and :373 read now_secs() for the old version's invalid_at after Memory::new stamped the new version's created_at; on a slow runner they straddle a second. merge.rs:1408-1416 keeps an input's own invalid_at when its mark already names the same next version, else writes next_created, so the result depends on which input's copy survives: associativity breaks. The rerun passed (timing). Suggested fix for a task before v0.21.0 READY: make the merged invalid_at a function of the chain alone (e.g. always next_created, or have the write stamp invalid_at from the new version's created_at), with a test that forces the straddle.
+```
+
+## 01M84TY64GCTTZYSR0N1S8A1MQ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-4c`
+- scope: private
+- created: 2026-11-23T18:33:19Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-4c","area":"decision","commit":"8b52e90","pr":180,"topic":"v0210-4c"}`
+
+```text
+REPORT v0210-4c (2026-11-23): DONE. Recall at start: found (report.v0210-4b). Code: commit f8210e7 on branch v0210-4c, PR #180 into release-0.21.0 (5 files, +479 -91), squash-merged as 8b52e90. (1) keyed.rs, both supersede paths (remember_keyed and the supersedes-an-unkeyed-record path): the old version's _mnemo.invalid_at is the new version's created_at (Memory::new's stamp), not a second now_secs() read. merge.rs (the key chain's links): the merged invalid_at is always the next version's created_at (created_secs: the record's created_at, or the ULID's seconds for a deleted next), never an input's own mark. Test tests/merge.rs a_superseded_version_ends_when_its_next_was_created_in_every_grouping: asserts the write stamps the new version's created_at, then hand-builds b's base version with invalid_at a second later (put_existing via __put_unvalidated_for_testing, as a 0.20.2 write could), merges a, b and d (a copy of a that deletes a's version) in four groupings (ab_d, a_bd, ad_b, d_ba), checks the records are equal and the base's invalid_at equals ids[1]'s created_at. Run against the old merge.rs it fails at the grouping check (assert_same_records); with the fix it passes. (2) proptest_merge.rs: each property's body is now a function (two_copies, three_copies, a_copy_of_a_copy) that the proptest! block calls; three tests replay all 25 saved cases through them by their shrunk inputs. Mapping (seed's first 6 hex digits): saved_cases_of_two_copies: 2217d7, a3c0f9, ed02c2, 364a48, fd93c0; saved_cases_of_three_copies: 3ec93e, 9072db, 0815b7, 083bdc, d05bcb, 0344e8, 32adae, f787fd; saved_cases_of_a_copy_of_a_copy: da61a6, a1a4b5, a70856, 2ab898, e61eac, 0d4571, e424a4, 91d13c, 8be26e, 6e5fb2, bd1071, c0ae0d. A script parsed every cc line's shrunk ops and clocks and matched them to the tests' entries: 25 of 25. The .proptest-regressions file is kept unchanged (proptest still reads it). CHANGELOG: an Unreleased Fixed entry. Checks: cargo fmt --check clean; clippy --all-targets -D warnings clean with and without failpoints (after a type alias Saved<N> for clippy's type_complexity); cargo test --features failpoints --no-fail-fast: 939 passed, 0 failed, 2 ignored (run before the clippy-only alias change); PROPTEST_CASES=2048 cargo test --features failpoints --test proptest_merge: 6 passed in 604.55s, no seed saved. CI: 21/21 after one rerun of rust (windows-latest), whose first attempt failed pager::tests::streamed_reads_reach_the_sink_once_each (src/pager.rs:1306, Some(1): None), the known 1-in-256 test bug in fact.flake-pager-streamed-windows (status.backlog-small), unrelated to this change. Deviation: none from the task body. Note: tests/merge.rs has 62 tests, 60 run without failpoints. Task-queue note: task next handed out v0210-5 before v0210-4c again; I took next once more and requeued v0210-5 untouched with a note.
+```
+
+## 01M84ZE4EW6KVMXPSNP5A4EPF5
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-5`
+- scope: private
+- created: 2026-11-23T19:51:56Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-5","area":"decision","commit":"23f9452","pr":181,"topic":"v0210-5"}`
+
+```text
+report.v0210-5 (worker-a, 2026-11-23): READY. v0.21.0 READY at 23f9452 on release-0.21.0 (PR #181, branch commit 7e5ff72, squash-merged; branch deleted); origin/main is an ancestor. RECALL: found (report.v0202-5: the bump list and the steps; spec.v0210 THEN). Woken by planner-a's brain post 'READ: v0210-5' (acked; waiter restarted). The branch holds, since v0.20.2: c080378 (REV-016 ideas doc), v0210-1 7f822d4, v0210-1b a023a62, site-1 (a45ad31, 543b6b6; merged in as a81a093), site-2 (fc8f8f4; merged in as 0632f8f), v0210-2 5a62405, v0210-3 2ed02e3, v0210-3b 5b0a1d6, v0210-4b 95db7ff, v0210-4c 8b52e90 (with the hand-offs 9dfd95b and 43969c9) and 23f9452. THE BUMP 0.20.2 -> 0.21.0, the same 12 files as v0202-5 (f3def96): mnemo/Cargo.toml; mnemo/Cargo.lock (mnemo-engine, mnemo-node, mnemo-uniffi); mnemo-python/Cargo.toml, Cargo.lock (mnemo-engine, mnemo-python) and pyproject.toml; bindings/node and bindings/uniffi Cargo.toml; the Kotlin gradle.properties VERSION_NAME; examples/mobile/ios/project.yml MARKETING_VERSION; the Android sample's mnemo-android dependency; root server.json (version, and the bundle URL .../download/v0.21.0/mnemo-v0.21.0.mcpb). integrations/mcpb and the plugin manifests have no version string. Lockfiles via cargo update --workspace --offline (only workspace packages changed); both pass cargo metadata --locked. MOBILE false (.github/release-mobile unchanged): git diff v0.20.2 HEAD -- mnemo/bindings examples/mobile is empty, so Swift and Android stay at 0.20.0 (which carries the 0.20.0 engine: no merge stamps or tombstones; older builds carry those through). CHANGELOG: [Unreleased] cut into [0.21.0] — 2026-11-23 with an intro (no format change: git diff v0.20.2 HEAD -- mnemo/src/format.rs is empty, both versions 9; mobile not published) and the compare links. LOCAL (macOS): cargo fmt --check ok; cargo test --locked --features failpoints: brain_backup 2, cli_smoke 46, guide 5, release_names 2, all passed (the full suite ran on v0210-4c: 939 passed, 0 failed, 2 ignored). CI: PR #181 27 of 27 passed; on 23f9452's push, CI 45245425497 and Mobile CI 45245425491 succeeded. DRY RUN 45245451671 on release-0.21.0 at 23f9452 (-f dry_run=true -f mobile=false): attempt 1 had one job cancelled, artifact check (aarch64-apple-darwin, the built-in embedder), never given a runner ('The job was not acquired by Runner of type hosted even after multiple attempts', with GitHub's macOS arm64 capacity notice), 24 succeeded and 9 skipped; I re-ran the failed job only; attempt 2 concluded success: 25 succeeded and 9 skipped (the Swift and Android build, publish and verify jobs, the gate, attest, the approval and Create GitHub Release). NOTE: v0210-5f (RB-020) and v0210-5g (REV-019) change the merge code after 23f9452, so the dry run should be repeated on the branch after those rounds, before the RC. VERSION TEXT FOR THE PLANNER'S HAND-OFF (v0210-5h), line numbers at 23f9452: README.md line 185, the example string 'the current release is v0.20.2' -> v0.21.0; a new 'What's new in v0.21.0' section above line 207 (the current v0.20.2 one), with 'The Swift and Android libraries stay at 0.20.0'; the mobile lines stay 0.20.0: 114 ('current 0.20.0'), 118 (mnemo-swift from: 0.20.0), 123 (mnemo-android:0.20.0). index.html: line 494, the pill v0.20.2 -> v0.21.0; line 785, '39 tagged releases' -> 40 (git tag -l 'v*' counts 39 now); line 799, 'These examples use v0.20.2.' -> v0.21.0; line 824, the example string -> v0.21.0. LEFT for v0210-6 and v0210-7: the RC install, docs/brain.md exported by the RC, main's fast-forward, the tag, the approval click.
+```
+
+## 01M85N77W4XQ94SB9S6M7N1XVS
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-5f`
+- scope: private
+- created: 2026-11-24T02:12:39Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795497939,"_mnemo.key":"report.v0210-5f","_mnemo.superseded_by":"01M8608M7BGED9YRJRMGBA45JD","area":"report","topic":"v0210-5f"}`
+
+```text
+REPORT v0210-5f (RB-020 fixes, fix round 1 of 3 for READY, 2026-11-23): BLOCKED on two proptest failures at 2,048 cases that need a decision on older-build key versions. Nothing committed; the work is uncommitted on branch v0210-5f (24 files). Recall at start: found (decision.v0210-chain-rule, report.v0210-2, report.v0210-4). DONE and passing on the gated tree: all six RB-020 items, REV-019.1's first part (a new write of an essence item, task or finding clears its flag), tombstone_after. First 2,048-case proptest run: 7 passed in 829.29s; its 7 saved seeds are saved_cases (32 seeds, all mapped). fmt clean; clippy with and without failpoints exit 0; full suite --features failpoints 948 passed, 0 failed, 2 ignored (86 results). Mutation run (scratchpad/mutate5f.py, 76 mutations, default cases): 69 killed, 7 survived. Two survivors are RB-020.1's own rules and are now killed by new tests: 'older versions placed by their latest number' (new test versions_an_older_build_wrote_apart_go_by_when_they_were_created) and 'put gives an older record no first stamp' (first-stamp assertion in a_one_sided_first_edit_of_an_older_record_wins_with_no_copy). Four reran at 2,048 cases ('a key version's copies always concurrent', 'unstamped copies compared by what was written', 'covered flag from the winner alone', 'put keeps the mark on a new record'): all failed prop_two_copies and prop_a_copy_of_a_copy, but so does the unmutated code at 2,048 (below), so they stay unresolved. 'covered fact keeps its flag' survives; I believe it is equivalent (a new write keeps a fact's flag) but no test shows it. BLOCKER, two failures of the unmutated code at 2,048 cases (fresh random cases the first run didn't draw): (1) seed ccd5d7, prop_two_copies, merge(x,x)=x: ops_a=[Keyed(0,0), ForgetKeyed(0), OlderKeyed(0,21)], ops_b=[], clocks 0. This build supersedes the base version v1 with v2 and forgets v2; an older build then writes v3 with no link. merge(a,a) places v3 before v1, because RB-020.1's fallback for an unstamped version is created_at*1000 (the start of its second) and v1's first stamp is later in the same second; v1 becomes live again over v3. It depends on the wall clock (only when both are written in one second), so it doesn't reproduce every run. The id's millisecond (a ULID) would fix the clock-aligned case, but not one where this build's stamps run ahead of the wall clock (copies merged with a fast clock), where an older build's write after a forget still sorts before the stamps. (2) seed bbed7a, prop_a_copy_of_a_copy, associativity: ops_a=[OlderKeyed(0,0)], ops_b=[OlderKeyed(0,0)], ops_c=[], ops_d=[ForgetKeyed(0)] (d is a copy of a after its ops). An older build marks the base version v1 superseded in place and leaves its stamp and _mnemo.ver, so copies of v1 with different marks share one (stamp, ver). In ((a+b)+c)+d the merge relinks v1 to b's version and no input holds v1 marked that way, so name_final_versions renames it (VER_MERGED); in a+(b+(c+d)) b's copy happens to carry that mark, so v1 keeps its name. Fixes tried and reverted (scratchpad/blocked5f/): stripping merge_linked, merge_conflict and merge_heads in only_marks_differ for stamped copies fixes ccd5d7's merge(a,b) part; accepting in name_final_versions only an input copy whose _mnemo.ver hashes to what it holds, and keeping the name when every input's copy is such a stale-named copy differing only in superseded_by and invalid_at, passes bbed7a but breaks a_keyed_manifest_rewritten_in_both_copies_leaves_one_live_manifest and a new four-copy case (ops_d=[OlderKeyed(0,0)] alone). Comparing by written_core in the naming breaks fd93c0 (commutativity: this build restamps a version it supersedes, so its marks are part of its version). Decision needed (the Planner, or the user): (A) keep fixing: order unstamped versions by the id's millisecond (a deviation from the triage's created_at) and rework the naming of stale-named copies, accepting that a clock-ahead copy can still misorder an older build's write; or (B) treat both as inherent to older builds, as with older deletes: limit the properties (no OlderKeyed on a key this build wrote in the same copy, and no in-place older marks feeding a renamed version), document it in the guide and CHANGELOG, and ship the rest. I recommend (B) for (1), since an older and a newer build writing one key in one second on one file, or after a fast-clock merge, is narrow and no merge rule can see the true order, and (A) for (2), because two machines still on v0.20.2 writing over one base version is a likely upgrade path and the result shouldn't depend on merge order. Dogfood (release build of this branch with keychain,embed-candle, two fresh copies of the brain, 37,343 records each, installed verify passed, both rekeyed to throwaway passphrases with the installed CLI, no --store): an untouched copy merged with itself reports older_deletes 0. The branch build rewrote status.dogfood-split on laptop and decision.v0210-chain-rule on desktop; then 0.20.2 made the v0210-4 set of writes (unkeyed fact, shared key dogfood.v0210-5f.shared, importance 0.31 / 0.72 on 01M80ZWP25CQRWN6WCTBEFFDTA, an essence item each, essence 01M7ZW0SRY09RBX1FWX0CHGN3Z resolved / edited, task v0210-5f blocked / noted, thread claude-code:6aee6c37-... forgotten, 10 turns). Merge: 37,247 merged, laptop only 4, desktop only 4, both 37,333, conflicts 1 essence, 1 fact, 1 key (3 flagged), removed 10, older_deletes 10, settled 0, dropped 0, renamed 0, after_cycles 0; output 49,274,880 bytes. Three runs 1.93-1.95s, peak RSS 390-394 MB, measured while the mutation run loaded the CPU (not re-timed idle); the three exports are byte-identical (37,245 memories), and merging the output with itself, the laptop copy or the desktop copy exports identically again (the desktop merge removes its 10 forgotten turns through the new tombstones). The output: about 37,342 memories, 3 flagged; history --key shows both branch rewrites live over the 0.20.2 versions and desktop's text live for the shared key; essence shows both new items and the resolved item with desktop's text; the task is blocked with both history entries; recall 0.37s, 255 MB; installed 0.20.2 reads it (task get). Copies kept in scratchpad/df5f until the decision. Deviations so far: REV-019.1's flag clear done here; merge(x,x) gains tombstones for x's deleted rows (laws stated modulo merge(d,d)); older-build deletes can also vanish by the engine's quarter-of-rows catalog rule; five more law fixes, one (covering-branch head pruning) also failing at base 23f9452 (9 of 150 runs); the new reserved key _mnemo.tombstone_after; merge's second-copy secret (MNEMO_B_PASSPHRASE, the key store whenever b has no flag, a prompt at a terminal, errors naming the copy).
+```
+
+## 01M8608M7BGED9YRJRMGBA45JD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-5f`
+- scope: private
+- created: 2026-11-24T05:25:39Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-5f","_mnemo.supersedes":"01M85N77W4XQ94SB9S6M7N1XVS","area":"report","topic":"v0210-5f"}`
+
+```text
+REPORT v0210-5f (RB-020 fixes, fix round 1 of 3 for READY, 2026-11-24): DONE. Recall at start: found (decision.v0210-chain-rule, report.v0210-2, report.v0210-4); after the BLOCKED, decision.v0210-5f-older-builds. Code: commit 8bde5dd on branch v0210-5f, PR #182 into release-0.21.0 (24 files, +1647 -168), squash-merged as 0c53ec5; CI 22 passed, deploy skipped. What changed: RB-020.1 slot order from write-made links, then first stamp, an older build's unstamped version by its id's millisecond (decision.v0210-5f-older-builds), put gives an older record's in-place rewrite that first stamp; v0.20.2 fixture keyed.mnemo (generator -- keyed). RB-020.2 a deterministic tombstone for every markerless deleted row, older_deletes in the report, the CLI note reworded. RB-020.3 a copy kept beside its record's tombstone stays, settled in the report, the guide's how-to-settle. RB-020.4 OlderRemember/OlderKeyed/OlderForget ops and prop_writes_on_an_output (merge_files, reopen, write, laws). RB-020.5 put lists an unstamped version's pair in hlc_prev. RB-020.6 items 1-6 (data-key test hook, the second copy's own secret: MNEMO_B_PASSPHRASE, its key-store entry when b has no flag, a TTY prompt, errors naming the copy; dead branch gone; leftover-file wording; keyed manifest slot; doc nit). Under the decision: (1) ccd5d7 fixed by the id-millisecond order; the clock-ahead case reproduced ([Keyed(0,0), Keyed(0,1), ForgetKeyed(0), OlderKeyed(0,2)] fails only at clock +1h, passes at 0 and 1 ms) and the four laws skip exactly that history (older_key_write_after_an_ahead_one); guide (new older-builds paragraph in Merge two copies), CHANGELOG and README say so beside the older deletes. (2) bbed7a fixed (option A): an input copy an older build marked superseded in place (its _mnemo.ver hashes to it without superseded_by/invalid_at, not with them) never names the merged version; the name comes from what the record holds, so it doesn't depend on merge order. A first rule pair that kept the name when every input held it alike passed bbed7a and the four-copy case ops_d=[OlderKeyed(0,0)] (saved as 0cdacf) but the next 2,048 run found 112dca (a: Keyed(0,0) at -1h, c and d: OlderKeyed(0,0)), so the keep rule was removed. Consequence (deviation): merging such a file even with itself names that version once, as older deletes gain tombstones; the two-copy law is merge(x,x) = x but for _mnemo.ver and _mnemo.hlc_prev of keyed records, plus merge(xx,xx) = xx; the older-build keyed test states the same. Whether the naming difference reached beyond _mnemo.ver: in the bbed7a and 112dca diffs the two groupings differed only in that version's _mnemo.ver and _mnemo.hlc_prev (content, links, flags and the live value were equal); with the fix the groupings agree. Two more 2,048-case finds, fixed: 39e50c, a conflict copy rewritten keeping its content hash (same text, a vector that rounds alike) still looked like a merge-made copy and the next merge made it again, losing the write (rule unchanged since base 23f9452; not run there); a copy is merge-made only while it holds _mnemo.merge_heads, which put removes; new test a_conflict_copy_edited_without_changing_its_text_keeps_the_edit fails without the fix. The output law's merge(x,x)=x now leaves out the copies the merge reports settled (RB-020.3 by design). And an intermittent failure of saved cases ed02c2/a3c0f9 (about 1 in 25-30 runs): Memory::new read the clock twice (created_at, id), so across a second boundary a merged invalid_at taken from a deleted next version's id moved by a second; both constructors in memory.rs now take created_at from the id (code older than this branch). After that 150 runs of all saved cases clean; one earlier failure (run 56) happened while two loops shared one log, cause not captured. Gates: proptest_merge PROPTEST_CASES=2048: 8 passed in 1086.76s (CPU shared with the mutation job); 36 saved seeds, 11 new (8fed47 df536c fe20b6 d38297 71685b f324e3 df9fb1 ccd5d7 bbed7a 39e50c 112dca), every one mapped to a saved case; five seeds mutants wrote were removed after they passed on unmutated code. Full suite --features failpoints: 950 passed, 0 failed, 2 ignored (86 results). clippy --all-targets with and without failpoints: exit 0. fmt clean. merge tests: merge 69, merge_cli 3, merge_groundwork 12, merge_v0_20_2 6 (1 ignored), proptest_merge 8. Mutation run (scratchpad/mutate5f.py, from mnemo/): first run 76 mutations, 69 killed, 7 survived. Killed since by new tests: 'older versions placed by their latest number' (versions_an_older_build_wrote_apart_go_by_when_they_were_created) and 'put gives an older record no first stamp' (first-stamp assertion in a_one_sided_first_edit_of_an_older_record_wins_with_no_copy). Added for this round's code, all killed: 'stale copies name the merged version', 'older versions placed by the second', 'edited copies pooled' ('stale versions renamed' targets the removed rule, not run). Rerun after the fixes on a snapshot of the final tree: the four at 2,048 cases all SURVIVE: 'put keeps the mark on a new record', 'a key version's copies always concurrent', 'unstamped copies compared by what was written', 'covered flag from the winner alone' (their earlier kills at 2,048 came from the base failures, now fixed). My reading, not proven: the two marks-only ones are redundant now that a key version's pair comes from its written core, and the other two change values the slot pass or the covering heads recompute. 'covered fact keeps its flag' survives and is equivalent: the only places that clear MERGE_CONFLICT are set_flag and put (essence, task, finding only) and relink_slots (every keyed fact or manifest, after resolve, with kept_flags reading both inputs' held copies), so for a keyed fact the covering branch's flag is overwritten, and an unkeyed fact's flag is never cleared and is part of its hashed version, so a covering winner descends from the flagged version and already carries it. Final: 5 survivors, named above. Dogfood (release build of the final tree with keychain,embed-candle; two fresh copies of .git/mnemo/project.mnemo, 37,349 records each, installed verify passed; rekeyed to throwaway passphrases with the installed CLI, no --store): an untouched copy merged with itself: older_deletes 0. The branch build rewrote status.dogfood-split on laptop and decision.v0210-chain-rule on desktop (RB-020.1's path); then 0.20.2 made v0210-4's writes (unkeyed fact, dogfood.v0210-5f.shared, importance 0.31/0.72 on 01M80ZWP25CQRWN6WCTBEFFDTA, an essence item each, 01M7ZW0SRY09RBX1FWX0CHGN3Z resolved/edited, task v0210-5f blocked/noted, thread claude-code:6aee6c37-... forgotten, 10 turns). Merge: 37,253 merged, laptop only 4, desktop only 4, both 37,339, conflicts 1 essence 1 fact 1 key (3 flagged), removed 10, older_deletes 10, settled 0, dropped 0, renamed 0, after_cycles 0; three runs 0.82-0.84s, peak RSS 394-398 MB, idle CPU; output 49,283,072 bytes. Exports of the three outputs and of merge(out,out), merge(out,laptop), merge(out,desktop) all byte-identical (37,245 memories); the desktop re-merge removes its 10 turns through the new tombstones. Output: about 37,348 memories, 3 flagged; history --key shows both branch rewrites live over 0.20.2's versions and desktop's text live for the shared key; essence shows both new items and the resolved item with desktop's text; the task is blocked with both entries; recall 0.34s, 254 MB; installed 0.20.2 reads it. Copies deleted. Deviations: REV-019.1's flag clear (essence, task, finding on a new write) done here; merge(x,x) gains tombstones for x's deleted rows and names in-place-marked older versions once (laws stated modulo merge(d,d) and those names); older deletes can vanish by compaction or the quarter-of-rows commit rule; the clock-ahead limit; the new reserved key _mnemo.tombstone_after; Memory::new's single clock read (memory.rs, outside the merge); covering-branch head pruning also failed at base 23f9452 (9 of 150 runs); merge's second-copy secret sources. For 5g: REV-019.1's first part is already in.
+```
+
+## 01M86CBNC744MMTK4C8W6ZZK1Z
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-5g`
+- scope: private
+- created: 2026-11-24T08:57:01Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-5g","area":"report","topic":"v0210-5g"}`
+
+```text
+REPORT v0210-5g (REV-019.1 and REV-019.2, fix round 2 of 3 for READY, 2026-11-24): DONE. Recall at start: found (report.v0210-5f, decision.v0210-5f-older-builds, the REV-019 findings). Code: commits 6c504ab and d6f7e4a on branch v0210-5g, PR #183 into release-0.21.0, squash-merged as d29d4b8 (17 files, +625 -105). CI: the first run's rust (ubuntu-latest) failed saved case ed02c2 (merge(x,x) moved a key's _mnemo.invalid_at by a second; fixed by d6f7e4a, below); the second run's ubuntu job failed two onboard_cli tests (a_hook_command_runs_from_a_path_with_shell_characters, claude_code_allow_rules_for_the_wake_commands) with 'Text file busy' (ETXTBSY: a stub executable run while a parallel test held a file open for writing), unrelated to this change; the failed job re-run passed: 22 pass, deploy skipped. Worth a look later: the onboard_cli stubs race on Linux. What changed. (1) A user's write clears _mnemo.merge_conflict at once: put's stamped path clears it on a fact, a conflict copy or a key's version (no _mnemo.kind); essence, task and finding since 5f. (2) A new write of a key settles its flagged earlier versions (my choice how): a key's version a write settles is marked _mnemo.merge_settled (new reserved key, memory.rs, re-exported), and relink_slots counts a settled version as one a write follows (not a head, never flagged again) and leaves it out of kept_flags; remember_keyed, after superseding the live version, walks back while each step is a merge-made link (_mnemo.merge_linked), at most 64 steps (SETTLE_REACH), and writes each flagged version again, which clears and marks it; an older build's write settles nothing. Tests: a_new_write_of_a_key_settles_the_version_a_merge_flagged (merged again with the old output and both inputs: no flag, chain k is c/b/a/zero, merge_conflicts empty), a_settled_version_stays_settled_when_the_version_it_lost_to_is_forgotten (settled by an in-place write, then b's version forgotten), and the edited-copy test now checks the copy's flag goes at once and stays gone when merged with the output as merged. (3) mnemo forget [PATH] <ID> (Command::Forget, as the MCP forget tool; an id with no live record is refused), README table, guide; test forget_settles_a_conflict_copy_from_the_shell. (4) The merge table lists the first 10 flagged ids (MERGE_TABLE_IDS), each with 'key K', 'task SLUG' or 'finding ID' where it has one (MergeReport.conflict_labels, also JSON and Python), then 'and N more'; tests merge_prints_what_it_did_and_json_gives_the_ids and the_table_names_a_flagged_keys_version_by_its_key. (5) The guide's after-a-merge paragraph (how to settle a fact's copy, a key and an essence item, task or finding) and how to put merged.mnemo in place as the project brain (mv the old aside, mv the merged in; give the brain's copy first so it opens with its key). (6) The five wording fixes: the NeedsWriteOpen refusal names a new mnemo verify --recover (one read-write open, then close, which finishes the pending work and changes no record; test checks the file's size is unchanged) instead of mnemo index (which builds the index), and the refusal test follows the hint and merges; embedders differ names mnemo reembed <b>; not one brain says a merge combines two copies of one file and these are two separate brains; the still-hold note prints only when something was removed, 'left out' now says expired or messages acked over 30 days ago, and a line gives the first copy's claims and presence (MergeReport.local, one count per input; the output keeps the first's, the counts leave them out); the guide's second-copy secret line rewritten (--b-passphrase, --b-key-file or MNEMO_B_PASSPHRASE). The four mutations carried from 5f: 'a key version's copies always concurrent' and 'unstamped copies compared by what was written' target only_marks_differ, which I removed as redundant: on a snapshot of the final code without it, every merge test passed (merge 70, merge_cli 6, merge_groundwork 12, merge_v0_20_2 6) and proptest_merge PROPTEST_CASES=2048 passed 8 in 800.64s with no new seed (a key version's pair is hashed from its written core, so the ancestry rule already takes such copies as one version). 'put keeps the mark on a new record' is equivalent: a stamped put of a record not live before is a new record, and every such keyed record comes from remember_keyed or remember_keyed_superseding with the caller's metadata, which check_caller_reserved refuses _mnemo.* keys in; the engine's other metadata copies (coordination.rs) are claims, presence and tasks, which never carry _mnemo.merge_linked. 'covered flag from the winner alone' (set_flag from the winner's heads instead of the joined ones): the joined heads equal the winner's when the winner's ancestry list holds every head of the covered input, which it does below HLC_PREV_KEEP (8); past that the joined heads keep an evicted head and with it a flag, the documented 'past 8 versions a merge keeps an extra conflict copy or flag'; not proven by a test. Mutation run for this task (scratchpad/mutate5g.py, from a snapshot of the final code before d6f7e4a, default cases): 13 run, 11 killed. Killed: a write keeps a fact flag, a settled version not marked, no settle walk, settle walk stops at once, settled not followed, settled keeps its flag (by the new forgotten-version test, after a first version of the test didn't reach kept_flags), no conflict labels, table lists no ids, still-hold note always, forget forgets nothing twice, and 'covered fact keeps its flag' (5f's equivalent one, now killed: a write clears a copy's flag, and the edited-copy test merges with the output as merged). Survived: 'put keeps the mark on a new record' and 'covered flag from the winner alone' (above). Two of the kills also failed a test the mutation can't reach (saved_cases_of_writes_on_an_output, the_table_names_a_flagged_keys_version_by_its_key) while the full check ran beside them; neither failed in 30 runs each alone. The CI fix (d6f7e4a), and a correction to report.v0210-5f: 5f's fix made Memory::new take created_at and the id from one clock read, but remember_keyed (and remember_keyed_superseding) then set the id to nil and put took a new one, so across a second boundary a key version's created_at and id still differed, and a merge reads a deleted version's creation from its id; 5f's 150 clean runs didn't hit a boundary, CI did. A keyed write now keeps the memory's own id (fresh_id in keyed.rs) and takes a new one, with created_at and accessed_at from the same read, only when the file already has a record with that id; test a_keyed_writes_created_at_is_its_ids_second (20 keyed writes and a reused id). Gates: proptest_merge PROPTEST_CASES=2048 on the merged release-0.21.0 at d29d4b8: 8 passed in 795.22s, no new seed (36 seeds, unchanged). Full suite --features failpoints after d6f7e4a: 956 passed, 0 failed, 2 ignored (86 results). clippy --all-targets with and without failpoints: clean (rerun after the last test edit too). fmt clean. Python: maturin build --release --features dev-hooks,embed-candle (CI's features) into a scratch venv, test_mnemo.py: all Python binding tests passed (a first build without dev-hooks failed test_index_and_snapshots, which needs MNEMO_DEV_ANN_MIN_FACTS). guide test 5 passed; llms-full.txt regenerated, llms.txt unchanged. Deviations: mnemo verify --recover is new (the triage asked for a safe hint; no existing command opened read-write without writing, and index builds, compact drops deleted rows); MergeReport gains conflict_labels and local (local is per input so the mirrored-report law holds; the tests' mirrored() swap it); the new reserved key _mnemo.merge_settled; only_marks_differ removed; a keyed write keeps its memory's id (keyed.rs, outside the merge). The merge's claims-and-presence line prints the first copy's count (the output's), not the second's.
+```
+
+## 01M86DCJKYE57773R3Y8KZXP3M
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-5h`
+- scope: private
+- created: 2026-11-24T09:15:00Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-5h","area":"report","topic":"v0210-5h"}`
+
+```text
+report.v0210-5h (worker-a, 2026-11-24): DONE. Recall at start: found (report.v0202-8h and report.handoff-sync-md, the hand-off pattern; report.v0210-5, the dry run). claim who: planner-a's file:README.md and file:index.html claims were released before the commit. The tree held README.md and index.html modified (32 insertions, 7 deletions; no home paths, emails or token shapes). COMMIT 3f822d5 'docs: v0.21.0 in the README and the landing page (v0210-5h)', README.md and index.html only, on branch v0210-5h from release-0.21.0 at 8b277f7 (inside a tree:checkout claim); PR #185 into release-0.21.0: checks 'assemble the site' pass, deploy skipped, MERGEABLE and CLEAN; squash-merged as 3a36575 on release-0.21.0 (branch deleted, under a tree:checkout claim, released). README claims checked against the shipped code (not edited, as asked): right: 'mnemo forget <id>, new in the CLI' (Command::Forget, PR #183); 'the merge's report lists the first ten' (MERGE_TABLE_IDS = 10 in the table); 'v0.20.2 opens a merged file' (v0210-5f's dogfood: the installed 0.20.2 read the merged output); 'The Swift and Android libraries stay at 0.20.0' (CHANGELOG [0.21.0]: the packages aren't published this release, .github/release-mobile is false; the source manifests say 0.21.0); index.html's '40 tagged releases' (39 v* tags now, 40 with v0.21.0). Not quite right, for the Planner: (1) 'the other stays as a flagged copy in its history': for a key, the other version stays in its history, flagged; for an unkeyed fact the other text is a separate record, a flagged conflict copy, not in the record's history. (2) 'write the record or key again: its flag goes at once': true for a key (the versions a merge flagged are settled at once), an essence item, a task or a finding, and for a conflict copy written itself; for a fact, the record isn't flagged (its copy is), and editing the record settles the copy only at the next merge, which drops it (as the guide says). (3) 'Random tests check this ... with copies that v0.20.2 wrote to': the property tests simulate an older build's writes (the dev-hooks __write_as_older_build_for_testing); files the published v0.20.2 wrote are checked by fixed tests (tests/merge_v0_20_2.rs), not random ones. DRY RUN 45361374327 on release-0.21.0 at 3a36575 (gh workflow run release.yml --ref release-0.21.0 -f dry_run=true -f mobile=false, mobile as .github/release-mobile says): completed success, 25 jobs succeeded and 9 skipped, 2026-11-24T09:02:14Z to 2026-11-24T09:13:32Z. This repeats v0210-5's dry run (45245451671 at 23f9452) on the branch after v0210-5f and v0210-5g, as that report asked, before v0210-6.
+```
+
+## 01M86DFQWXVZFQ6DGNGGSWCR6D
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-5i`
+- scope: private
+- created: 2026-11-24T09:16:43Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0210-5i","area":"report","topic":"v0210-5i"}`
+
+```text
+report.v0210-5i (worker-a, 2026-11-24): DONE. Recall at start: found (report.v0210-5h, the three catches; the hand-off pattern). claim who: no file: or tree: claims. The tree held README.md alone modified (13 insertions, 11 deletions; no home paths, emails or token shapes). COMMIT 0456071 'docs: the v0.21.0 notes say what settles each conflict (v0210-5i)', README.md only, on branch v0210-5i from release-0.21.0 at 3a36575 (inside a tree:checkout claim); PR #186 into release-0.21.0 reported no checks (a README-only change is outside CI) and was MERGEABLE and CLEAN; squash-merged as 724f630 on release-0.21.0 (branch deleted, under a tree:checkout claim, released). No dry run, as the task says. The three bullets checked again against the code and the guide: (1) a key's other version stays in its history, flagged, and a fact with no key gets a separate flagged copy: right. (2) writing a key again settles its flagged versions at once: right (the settle walk reaches back through up to 64 merge-made links); changing a flagged essence item, task or finding settles it at once: right, with one exception the line leaves out: a task or finding a merge renamed (<name>-merge-2) keeps its flag until it can take its name back (put clears the flag only without _mnemo.merge_name); forgetting a fact's copy settles it: right (the guide also has editing the record, whose copy goes at the next merge, and writing the copy itself, whose flag goes at once). (3) random tests with writes made the way older builds make them, fixed tests with files the published v0.20.2 wrote: right. The rename exception is the only point left, for the Planner to weigh; not edited.
+```
+
+## 01M87367RJ015D7S3E0708BFTB
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-6`
+- scope: private
+- created: 2026-11-24T15:36:01Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.first_hlc":1795534561042,"_mnemo.hlc":1795534901844,"_mnemo.hlc_prev":[[1795534561042,4382610938925939065]],"_mnemo.invalid_at":1795534901,"_mnemo.key":"report.v0210-6","_mnemo.superseded_by":"01M873GMHVCJ3K9ZRZH3T6DQ3D","_mnemo.ver":4503384095281192254,"area":"report","topic":"v0210-6"}`
+
+```text
+report.v0210-6 (worker-a, 2026-11-24): WAITING for the user. Recall at start: found (report.v0202-6, the install pattern; decision.dogfood item 4). STEP 1: built release-0.21.0 at 724f630622a301e41438123a8fbc7ae2490742c5 (the branch head, equal to origin) with cargo build --release --locked --features keychain,embed-candle (release.yml's features), installed to ~/.local/bin/mnemo by one atomic mv (copied to mnemo.new beside it, then mv -f): mnemo 0.21.0, 11,411,280 bytes, mtime 2026-11-24T01:20:04-0800, SHA-256 649a47c1cefc4c443b03aba92f9239d293f65a24797a4739729c71583ace28eb (equal to the built binary's). The 0.20.2 binary it replaced is kept as mnemo-0.20.2-release.bak in worker-a's scratchpad (SHA-256 94751b68fe2aca414a1257366147f8ce4108f17cf7a760081d7f627862b02362). WAITING: the user approves the keychain prompt the new binary brings and reconnects /mcp in every session, so the MCP servers run 0.21.0. On READ: v0210-6, the checks: about and verify on the real brain with the RC, then the merge walkthrough on two fresh rekeyed copies.
+```
+
+## 01M873GMHVCJ3K9ZRZH3T6DQ3D
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-6`
+- scope: private
+- created: 2026-11-24T15:41:41Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.first_hlc":1795534901819,"_mnemo.hlc":1795534901819,"_mnemo.key":"report.v0210-6","_mnemo.supersedes":"01M87367RJ015D7S3E0708BFTB","_mnemo.ver":2393923620205198400}`
+
+```text
+report.v0210-6 (worker-a, 2026-11-24): DONE, with one wording finding in the merge table for the Planner (below). Recall at start: found (report.v0210-4, the copy-and-rekey pattern; report.v0210-6, step 1). STEP 1 (already in the WAITING version): RC 0.21.0 from 724f630, SHA-256 649a47c1..., installed 01:20:04 PST; planner-a's note verified it and the three MCP restarts. REAL BRAIN, installed RC: about exit 0, header '37387 memories: 524 facts, 36360 turns, 82 essence, 421 coordination, 136 snapshots', no merge-conflicts line (expected none). verify: 'verified 37387 records - all pages decrypt and decode', exit 0, 0.16 s, 31 MB peak RSS. COPIES: .git/mnemo/project.mnemo cp'd twice into worker-a's scratchpad (70,918,144 bytes each); verify passed on both (37387 records, key found in the keychain by salt). Rekeyed with the installed CLI to throwaway passphrases (MNEMO_NEW_PASSPHRASE, no --store); info then showed 'key source: MNEMO_PASSPHRASE' for each. One change in each: mnemo update 01M80ZWP25CQRWN6WCTBEFFDTA (decision.inspect-refresh, importance 0.50) --importance 0.31 on laptop, then 0.72 on desktop. MERGE (laptop first, MNEMO_B_PASSPHRASE for desktop): exit 0, 1.01 s, 392 MB peak RSS (one timed run), output 49,364,992 bytes. Table: 'merged ... 37278 records'; 'from laptop.mnemo only: 0, from desktop.mnemo only: 0, in both: 37387'; 'conflicts: 1 fact (1 record flagged; `mnemo inspect merged.mnemo` lists them)' then the id 01M80ZWP25CE65TPTFV0DTYHDS with no label (as documented: conflict copies have none); 'removed, deleted in a copy: 0'; 'plus laptop.mnemo's claims and presence: 110 (not merged: the output keeps the first copy's, and the counts above leave them out)'; the older-build note with both first-v0.21-write dates 2026-11-24. JSON (second run): merged 37278, both 37387, conflicts {fact:1}, conflict_ids [the copy], conflict_labels {}, local [110,110], lead_ms [-15672,-15593], hlc_since set on both, a_only/b_only/removed/settled/renamed/kept_keys/after_cycles empty, dropped 0, older_deletes 0. OUTPUT: verify 37388 records. about: '37388 memories: 525 facts, ... 1 snapshots' and '# 1 record flagged by a merge as in conflict; `mnemo inspect` lists them'. The original id holds desktop's 0.72 (the later edit); the conflict copy holds laptop's 0.31 with _mnemo.merge_conflict, _mnemo.merge_heads and _mnemo.merge_source = the original id, and no _mnemo.key. inspect (loopback, token from the printed link): /api/about conflicts 1; /api/memories?conflict=yes total 1, the copy with conflict true, importance 0.31 (scope private, as the original's). FORGET: mnemo forget merged.mnemo 01M80ZWP25CE65TPTFV0DTYHDS: 'forgotten', exit 0; again: 'error: no live memory ... to forget', exit 1. about after: 37387 memories, 524 facts, no flag line; the original still 0.72. inspect after: conflicts 0, conflict=yes total 0. Extra check: merge(output after forget, desktop): exit 0, 'conflicts: none', from the output only 1 (the forget's tombstone 01M873AST8NN8SF83MBT588FZ5, _mnemo.kind tombstone), so the settled copy stays gone. FINDING (wording, merge table): 'in both: 37387' counts the 110 claims and presence too (store/merge.rs:1094 counts every shared id before the Local kind is set aside; 37387 - 110 + 1 conflict copy = 37278 merged), so the local line's 'the counts above leave them out' (src/bin/mnemo.rs:2738, from v0210-5g) is wrong for 'in both'. MergeReport::both's doc ('Records both inputs held') is accurate. Suggest: count both without Local, or word the line 'the merged count leaves them out'. Not changed; the Planner decides whether it holds the tag. ASIDES: (1) test/scripts/project_memory.py reads_the_brain treats an info timeout (60 s, here the pending keychain prompt) as 'no keychain in this build', a misleading label; suggest a separate 'timed out' label. (2) about's header says '1 snapshots' (plural for one). (3) Order slip at the WAITING: the post went out before report.v0210-6 existed (the first report write failed on (1)); the report was written minutes later. CLEANUP: both copies, the output and four extra merge outputs deleted, with the scratch about/inspect dumps that held brain text. The real brain was only read (about, verify) and copied. No commits.
+```
+
+## 01M8775E397K7THMS2AHWY4MMD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0210-6b`
+- scope: private
+- created: 2026-11-24T16:45:29Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.first_hlc":1795538729066,"_mnemo.hlc":1795538729066,"_mnemo.key":"report.v0210-6b","_mnemo.ver":3090984598929547920}`
+
+```text
+report.v0210-6b (worker-a, 2026-11-24): DONE. Recall at start: found (report.v0210-6, status.dogfood-gap-g16). COMMIT: 52b7a64 on v0210-6b-wording, PR #187 into release-0.21.0, squash-merged as d183a6b after CI green (21 checks pass, 0 fail). Files: mnemo/src/bin/mnemo.rs, mnemo/tests/merge_cli.rs, test/scripts/project_memory.py, CHANGELOG.md, mnemo-python/src/lib.rs (a doc comment). (1) The merge table's local line now reads 'plus <a>'s claims and presence: N (not merged: the output keeps the first copy's; the merged count leaves them out)'. CLI wording only; MergeReport and merge.rs unchanged. The CHANGELOG's 0.21.0 merge entry and the Python merge_files doc said 'the counts leave out' and now say 'the merged count leaves out'. No test pinned the old line; the guide and mnemo/README.md don't quote it. (2) about's header: a count of one takes the singular, for snapshots and also memories, facts and turns (essence and coordination are mass nouns); a CHANGELOG Fixed line. No test or script parses the header (project_brain.rs checks 'facts, 0 turns, 0 essence, ', still true). (3) G16: reads_the_brain now returns a reason or None: a TimeoutExpired gives 'timed out reading the brain's key: approve the keychain prompt for this binary, then run this again'; an OSError gives 'could not run it: ...'; 'none in this build' stays 'no keychain in this build'. When any candidate timed out, the exit message says to approve the prompt instead of 'Install one'. Checked with a stubbed subprocess.run (all four outcomes and both exit messages); a real recall still runs. TESTS: new merge_cli test the_claims_line_says_only_the_merged_count_leaves_them_out (a claim in the base, one fact in each copy: merged = both - local + 2, the exact line, no 'counts above', and about's ' · 1 snapshot)' on the output). It fails on each old line put back one at a time (panics at merge_cli.rs:339 for the wording, :351 for the plural). GATES (local, the commit's tree): cargo fmt --check ok; clippy --all-targets -D warnings exit 0, and with --features failpoints exit 0; cargo test --locked --features failpoints 957 passed, 0 failed, 2 ignored (86 result lines; 956 before plus the new test). The guide is unchanged, so no llms regeneration. No dry run and no RC install, per the task. ORDER NOTE: task next took v0210-7 first: its after field still names v0210-6, though planner-a's note says it now follows v0210-6b. I set it back to queued with a note, took it once more only so the next task next would give v0210-6b, then set it queued again (both steps noted on v0210-7). The Planner may want to set v0210-7's after to v0210-6b; task next takes no slug. Deviations: none from the task body.
+```
+
 ## 01M7PEYPQ3MXR42MYWFEHJCE0J
 
 - type: procedural
@@ -4088,6 +4963,91 @@ STEP 4 (v0202-4) stale knowledge and stats, G8 + G9: (a) `mnemo supersede <old-i
 STEP 5 (v0202-4o) onboard writes allow rules, Claude Code (user, 2026-11-20, decision.onboard-allow-rules): `mnemo onboard` adds Claude Code permissions.allow entries, in the same settings file it already writes hooks to for the scope (.claude/settings.local.json or .claude/settings.json; plan_claude/plan_hooks_file in onboard.rs, no permissions today): Bash rules for the installed mnemo's `wait`, `inbox` and `ack` (the exact command shapes a session runs, full path and bare `mnemo`; check Claude Code's rule syntax in its docs) and `mcp__mnemo__*`. They show in the plan before the question and in the terminal view's tags, are recognised as ours like is_our_hook, keep other entries in order (mcp_install's merge), and `onboard --remove` takes out only ours. No rule for anything that writes outside the brain. Tests in tests/onboard_cli.rs (the stub claude, never the real config). Antigravity is not in this step.
 THEN: v0202-5 READY (versions 0.20.2 in manifests, lockfiles, server.json, integrations/mcpb, CHANGELOG; dry run mobile false); v0202-5h the Planner's hand-off (README, index.html, AGENTS.md protocol text for the pointer trial and claims if the trial holds); v0202-6 install the release candidate for dogfooding (as v0201-4); v0202-7 the release (as v0201-5). The MCP registry publish stays the user's.
 TRIALS during v0.20.2 (decision.v0202-use-what-we-built items 2 and 3; results in status.pointer-trial): pointers are brain posts (`mnemo post <agent> '<pointer>'`); no SendMessage unless one isn't picked up in 10 minutes (then send it too and log the miss). WAITING is still told to the user directly. The Worker takes `mnemo claim take tree:checkout --ttl 10m` around a branch switch and releases it after; before staging or switching it runs `mnemo claim who` and stops on a planner-a claim on a file it would touch. The Planner claims `file:<path>` before editing a Planner-owned file and releases it when the hand-off task is added.
+```
+
+## 01M7YJVXF6KR904FSDTHRNGN8A
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `spec.v0210`
+- scope: private
+- created: 2026-11-21T08:16:50Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795277379,"_mnemo.key":"spec.v0210","_mnemo.superseded_by":"01M7ZDXP3Q78XY4SF2J6XX7VVN"}`
+
+```text
+spec.v0210 (planner-a, 2026-11-21; decision.v0210-start, docs/design/sync.md sections 6, 7, 11, 12). v0.21.0: 13.7 `mnemo merge`, free and local: combine two diverged copies of one brain into a new file. No format bump (everything new is metadata or records). Release branch release-0.21.0 from main at c080378, mobile false unless a step needs the bindings. Each step its own PR with tests and a CHANGELOG line. Check every claim below against live code first and report any that's wrong; facts marked (checked) were read in the code by planner-a on 2026-11-21.
+FACTS THE DESIGN RESTS ON (checked): there is no brain id; two cp copies share the header salt (format.rs:241), which is also the keychain account (keys/os_store.rs:91-108), and compaction keeps it (maintenance.rs:939-953). Records are updated IN PLACE for supersession (the old version gets _mnemo.superseded_by and _mnemo.invalid_at, keyed.rs:168-195), essence items (status_history, updated_at), tasks and findings (status_history {from,to,at,by}), and message acks; so the same ULID can hold different content in the two copies as a normal case, not only as damage. A key's live version is the record in its slot (owner, key) with no superseded_by; two live ones resolve by the larger ULID (crud.rs:643-659). Thread turns get a fresh ULID per ingest, deduplicated by _mnemo.turn_id within a thread (threads.rs:279-310). A delete is only a catalog flag with no time, pruned at a base rewrite and dropped by compaction (crud.rs:389-451, records.rs:915-930): a deleted record can't be told from one that never existed. No HLC and no merge_conflict exist yet. put_existing keeps ULID, created_at and metadata (records.rs:1568), as copy_live_into does (maintenance.rs:463-543). The embedder identity is in the manifest and the _mnemo.embedder cache entry (embed.rs:198-329).
+STEP 1 (v0210-1) the groundwork: (a) a hybrid logical clock: every write and in-place update from v0.21.0 stamps _mnemo.hlc (wall ms, bumped past the largest hlc the handle has seen, so it never goes backwards); old builds carry it through. (b) durable tombstones: a delete or forget also writes a small engine record (kind tombstone: the deleted id, its key slot if keyed, the hlc and time; never any content, so a forgotten secret stays gone), kept out of recall, about counts and export --git like other engine records, and kept by compaction (it's how a merge knows a delete happened). Report the record and catalog cost per tombstone.
+STEP 2 (v0210-2) Mnemo::merge (library, in store/, beside maintenance.rs): inputs opened read-only, output a new file under the first input's salt and key (so the keychain entry works), refusing: different salts (different brains), different embedder identities, a format older than 9, an output path that exists. Rules (sync.md section 7, made exact by the facts above): records unioned by ULID; the same ULID in both, differing: per kind, keyed versions take the union of their supersession links, essence items the newer hlc (else updated_at, else created_at) with 'resolved beats a concurrent open unless the open came after', tasks and findings the union of status_history entries with the newest entry's status (two replicas taking the same task at once is flagged _mnemo.merge_conflict), message acks: acked wins; anything else differing: the newer hlc, the other content kept as a new record stamped _mnemo.merge_conflict. A key written in both since they diverged: the newest by hlc (then created_at, then ULID) is live, the other superseded and stamped _mnemo.merge_conflict; both stay in history_in. Turns: one per (thread, turn_id), the earlier ULID kept. Tombstones: a record tombstoned in either copy stays deleted in the output (a keyed fact: unless the other copy wrote a newer version of that key after the tombstone's hlc). Claims and presence come from the first input only (they're leases on one machine). Snapshots: the output starts with one snapshot. The result reports counts: from each side only, merged, conflicts by kind, tombstones applied. TESTS: diverged copies for every rule; proptests over random interleavings of writes, updates, supersessions, deletes and task moves on two copies, checking merge(a,b) and merge(b,a) give the same live records and key slots, merge(x,x) equals x, and merge(merge(a,b),b) equals merge(a,b) (idempotent); every record visible in VisibilitySet::ALL survives.
+STEP 3 (v0210-3) the surfaces: `mnemo merge <a> <b> -o <out>` (the report as a table and --format json; exit 1 on a refusal with the reason), conflicts shown in about's header and mnemo inspect, the guide (a sh test block), README CLI table, the Python binding (merge_files), AGENTS.md's task table row. No MCP tool (a merge writes a new file; it's a person's command).
+STEP 4 (v0210-4) dogfood on copies, never the live brain: copy .git/mnemo/project.mnemo twice into a scratch folder, write diverging facts, essence changes, a task move and a forget in each with the installed CLI pointed at the copies, merge them with the branch build, and report the counts, every conflict, the time and the output size; then open the output with about, recall and essence render. Delete the copies after.
+THEN: v0210-5 READY (versions 0.21.0, CHANGELOG, dry run); rb-019 REVIEWER-B at READY (the Planner scopes it: the merge rules against this spec, tombstones and forgotten content, the salt and key handling); fixes; v0210-5h the Planner's version text; v0210-6 the release candidate install; v0210-7 the release.
+```
+
+## 01M7ZDXP3Q78XY4SF2J6XX7VVN
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `spec.v0210`
+- scope: private
+- created: 2026-11-21T16:09:39Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"spec.v0210","_mnemo.supersedes":"01M7YJVXF6KR904FSDTHRNGN8A"}`
+
+```text
+spec.v0210 rev 2 (planner-a, 2026-11-21; decision.v0210-start, decision.v0210-merge-rules, RB-019 triage, docs/design/sync.md sections 6, 11, 12). Rev 1 STEP 1 is built (7f822d4, report.v0210-1). Rev 2 adds STEP 1b and rewrites STEP 2 after REVIEWER-B's spec check RB-019 (all 8 accepted); STEPS 3 and 4 gain lines. v0.21.0: 13.7 `mnemo merge`, free and local: combine two diverged copies of one brain into a new file. No format bump. Branch release-0.21.0, mobile false unless a step needs the bindings. Each step its own PR with tests and a CHANGELOG line. Check every claim against live code first and report any that's wrong.
+FACTS (checked; rev 1's list still holds): rekey draws a new random salt (maintenance.rs rekey_unchecked); a long turn is several records under one _mnemo.turn_id with _mnemo.part (threads.rs); the legacy coordination scan looks only at episodic fact rows (coordination.rs legacy_coordination_ids); remember with a deleted record's id makes it live again (crud.rs remember/put).
+STEP 1b (v0210-1b) changes to step 1's code, before the merge: (a) a turn's marker also holds _mnemo.tombstone_thread and _mnemo.tombstone_turn (ids only, never content); (b) the legacy scan also checks working-type fact rows with the sentinel vector, so markers are found, and about and kind_counts stay right, after an older build's compact (RB-019.1); (c) prune_messages writes no marker (the merge applies compaction's drop rule instead; RB-019.7); (d) the manifest records the first stamp a v0.21+ build wrote in the file (_mnemo.hlc_since, set once, on the first stamped write in a file that has a manifest and lacks it); (e) a dev-hooks clock offset in ms for next_hlc, so a test can run one copy ahead, behind, or in the same millisecond (RB-019.8); (f) when a handle's largest stamp seen is more than a day ahead of now, next_hlc still goes past it, and the library exposes that so the CLI says it once on stderr (the library prints nothing). CHANGELOG and the guide say a delete no longer shrinks the file, and compact doesn't remove markers.
+STEP 2 (v0210-2) Mnemo::merge (library, store/, beside maintenance.rs). A pure function of the two inputs: it never reads the wall clock and never makes a random id; a record the merge changes keeps the larger of its two inputs' stamps.
+IDENTITY AND OUTPUT (RB-019.6, user choice): the inputs are one brain when their salts match or both manifests have the same ULID; otherwise refuse, naming both. With different salts the second input needs its own secret (the library takes one per input; for keychain-held keys each is found by its own salt). Inputs opened read-only, held for readers for the whole merge. The output follows compaction: the first input's secret, its kind, salt and KDF settings (never lower), and a NEW data key (its wrapped key differs from both inputs'); written to a temp file in the output's directory, owner-only, synced, then put in place with a call that fails if the name exists; on any error nothing is left. The result cache: only the engine's own entries (the embedder identity), never cached results. Refusals, each with its reason: not one brain; different embedder identities or dimensions (both absent with equal dimensions is fine); different float-vector settings; an input older than format 9 (the merge's own check: a read-only open accepts v8); a torn header (say which command fixes it); an output path that exists, or is one of the inputs, through a link too.
+THE RULES, in order.
+(0) Classify every record by its decoded _mnemo.kind, never by the row kind. Drop from both inputs what compaction drops (expired records, compact_drops, acked messages past the keep time).
+(1) DELETES FIRST, by id, with no clock (RB-019.2, user choice): a marker in either input removes the id it names from the output, unless that same input holds a live record with that id (re-created after the delete: the marker is void). A deleted catalog row with no marker counts as a delete of that id. A turn marker removes every record of its (thread, turn_id) from both inputs. A removed id takes part in no other rule and no conflict copy is made of it. A conflict copy holds _mnemo.merge_source (the id it came from), and a marker for that id removes the copy too. One marker per id in the output (the larger stamp, then the larger ULID). A version of a deleted key that the deleting input never held is kept, and the report names the key ('deleted in a, written in b: b's version kept').
+(2) ONE NUMBER PER RECORD for every comparison (RB-019.5): the larger of _mnemo.hlc and _mnemo.updated_at in ms; with neither, created_at in ms. A tie on one ULID: the larger hash of the record's bytes. A tie between history entries: order by the entry's bytes.
+(3) PER KIND, for the same ULID in both inputs, differing (RB-019.3, RB-019.4):
+- Facts: the larger number's content; the other content kept as a conflict copy, stamped _mnemo.merge_conflict and _mnemo.merge_source, whose id is derived from the source id and a hash of its content (the same in every run), with the original's visibility, scope and agent. Same user-visible content after the keyed write's own comparison (same vector rounding) is not a conflict.
+- A key slot (owner, key): one chain of all its versions from both inputs: each input's own order kept; versions on different branches ordered by number, then created_at, then ULID; relinked both ways (_mnemo.supersedes and superseded_by); a version superseded by the merge gets invalid_at = the next version's created_at. The last is live. When both inputs wrote different content to the slot since they diverged, the version the merge superseded is stamped _mnemo.merge_conflict; both stay in history_in.
+- Unkeyed supersession: a mark from either input stays, whichever content wins; when the marks name different records, the one with the larger number.
+- Essence items: resolved in either input is resolved; the text of the larger number; when text and status both differ, stamp _mnemo.merge_conflict.
+- Tasks and findings: one record per name (task slug, finding id). The same ULID: status histories unioned; done and verified are final; otherwise the newest entry's status; the owner from the merged history (the last move to active); other fields from the larger number; text and status both differing gets _mnemo.merge_conflict. Two ULIDs under one name: the earlier ULID keeps the name, the other is renamed <name>-merge-2 (then -3, ...), stamped _mnemo.merge_conflict, and the report gives the new name; never join two records that only share a name. After the merge, flag any `after` cycle. An unverified SECURITY finding's visibility comes from the merged status.
+- Messages: union; delivery takes the furthest state, the seen lists their union, acked wins. Bookkeeping fields (delivery, _mnemo.seen_by, _mnemo.ready_seen_by, access counts: the larger) never make a conflict.
+- The manifest, thread links and other engine records: the larger number, or the one input; never a conflict copy. Conflict copies are for facts only.
+- Turns: per (thread, turn_id), every part from the one input whose first part has the earlier ULID. _mnemo.seq can repeat after a merge; order then falls to the ULID.
+- Claims and presence: the first input only. Snapshots: the output starts with one.
+(4) THE REPORT: counts from each side only (ids with --format json), merged, conflicts by kind, markers applied, keys deleted on one side and written on the other, renamed tasks and findings, after-cycles, each input's lead of its largest stamp over the clock at merge time (a warning past one hour; the number in json), and two notes: deletes made before an input's _mnemo.hlc_since, or by an older build, aren't known to a merge; and the input files still hold the records the merge removed.
+TESTS (RB-019.8): the clock offset hook first. Properties: every (id, content) pair from either input is in the output, as the record or a conflict copy, unless a marker names it or it's a second copy of a turn; nothing a marker names is in the output under any id. merge(a,b) and merge(b,a) are equal in every record, each key's history_in, the superseded flags, conflict stamps and copies' ids, the markers, every task's and finding's status and history, and the report (mirrored); only claims, presence and the salt may differ. merge(x,x) = x; merge(merge(a,b),b) = merge(a,b); merge(merge(a,b),a) = merge(a,b); merge(merge(a,b),c) = merge(a,merge(b,c)). Proptests over random interleavings on two and three copies, with clock offsets (ahead, behind, the same ms). Cases: equal stamps on one ULID and equal `at` in histories; one copy an hour ahead (the report says so); merge(x,x) with deletes, a re-created id, expired records and a pruned message; fixtures written by the published v0.20.2 (no stamps, a delete with no marker, a stamped record it edited in place, a file it compacted after v0.21 wrote markers), committed like tests/fixtures/v8/; a forgotten record checked through every read (recall in ALL, history_in, conflict copies, thread export, keyword recall for a word only it held, the result cache), with the other copy having edited it, and a turn saved in both under two ids; both copies superseding one version; supersede against an in-place edit; the same value written in both (no conflict); two tasks with one slug, two findings with one id, an after-cycle across copies, done against a later move; each refusal with its reason, a rekeyed copy (merges, with its own secret), an input that needs a write open, the output being an input; the inputs' bytes unchanged; a failpoint mid-merge leaves no output; the output opens with the first input's secret and its wrapped key differs from both; an output merged again after new writes stamps past both inputs.
+STEP 3 (v0210-3) the surfaces: `mnemo merge <a> <b> -o <out>` (a secret option per input; the report as a table and --format json; exit 1 on a refusal with the reason; the clock notice from 1b(f)), conflicts shown in about's header and mnemo inspect, the guide (a sh test block; merge copies, not a live brain, since the inputs hold writers out for the whole merge), README CLI table, the Python binding (merge_files), AGENTS.md's task table row, seed.json. No MCP tool.
+STEP 4 (v0210-4) dogfood on copies, never the live brain: copy .git/mnemo/project.mnemo twice into a scratch folder, write diverging facts, essence changes, a task move, a forget and a rekey of one copy with the installed CLI pointed at the copies, merge them with the branch build, and report the counts, every conflict, the time, peak memory and the output size; open the output with about, recall and essence render. Also time and peak memory for two 100K-record copies. Delete the copies after.
+THEN: v0210-5 READY; REVIEWER-B at READY as batch RB-020 (the Planner scopes it: the built merge against this spec); fixes; v0210-5h the Planner's version text; v0210-6 the RC install; v0210-7 the release. After: v0.21.1 plugin listings (decision.plugin-directory).
+```
+
+## 01M80ZWC2YE1PGCGN8QR63XRE1
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `spec.v0212-inspect`
+- scope: private
+- created: 2026-11-22T06:42:45Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795463223,"_mnemo.key":"spec.v0212-inspect","_mnemo.superseded_by":"01M84Z55ZCDTE32PF15W0KY61S"}`
+
+```text
+spec.v0212-inspect (planner-a, 2026-11-21; decision.inspect-refresh, decision.brand, the user approved the mockup 2026-11-21). v0.21.2, a patch after v0.21.1: mnemo inspect on brand, with an overview first and a brain picker that attached brains (roadmap 4b) fills later. Starting it needs the user's go at the time. The approved mockup is in the repo: docs/design/inspect-refresh/overview-light.dc.html and attached-brains-dark.dc.html (Design-canvas files: read their markup and the data in renderVals for layout, copy and colors; they are not the page). Check every claim against live code first and report any that's wrong. THE PAGE (mnemo/src/bin/mnemo/inspect.html): (1) Colors only from docs/brand.md's tokens, as CSS variables named as there (--bg, --surface, --ink, --ink-2, --ink-3, --line, --line-2, --accent, --accent-ink, --accent-tint, --on-accent, --amber, --amber-tint, --mono and --sans stacks, --radius 12px, --radius-sm 8px), light by default, dark under prefers-color-scheme guarded by :root:not([data-theme=light]) and under :root[data-theme=dark]; a theme button (aria-label) that sets data-theme, remembered in localStorage inside try/catch. A test checks that every hex color in inspect.html is one of brand.md's, except the mark's four fixed colors. (2) The mark inline (docs/img/logo.svg's paths, 28 px, never in a box, no shadow), the wordmark MNemo (700, letter-spacing -0.02em, --ink) and 'inspect' beside it in --ink-3; title 'MNemo inspect'. (3) Header: the mark, a Brain picker (a labelled select, one entry now: 'project brain' and its path relative to the repo, or the file name), a 'read-only view' badge, the read time, the theme button, Reload. (4) Tabs: Overview (new, the default, and #overview), Memories, Keyed history, Threads, Tasks, Findings, Messages (new), Snapshots, About; the old hashes keep working. (5) Overview, in this order: six tiles (facts; saved turns, with how many hold real text; tasks open with active, blocked and queued, and done; findings open by status, and verified; messages unread and delivered; essence items); Needs attention (active and blocked tasks with their owner, queued tasks, merge conflicts from v0.21.0's flags and copies, or 'none', and stale records by mnemo stale's rules, or 'nothing stale'); Agents (presence: name, role, alive or not, and its active task); Where the space goes (one bar and a legend: vectors, records and indexes, snapshot history, in MB, with the placeholder-turn note when marker-only turns are more than a quarter of the turns, naming how many and their vector bytes); Recent changes (the 10 newest facts, decisions, statuses, messages and task moves, with time, kind, key or slug, and a one-line text). (6) Messages tab: from, to, subject (the pointer), delivery state, refs, time; filters by agent and state. (7) Real buttons, labels and inputs, 44 px targets, text contrast 4.5:1 in both themes, works at 390 px wide (the header and tabs wrap, tables scroll in a box). THE SERVER (inspect.rs): GET-only as now, read once and close, brain text into text nodes only. New routes: /api/overview (the tiles' counts, the attention lists, the recent list), /api/messages, /api/presence, /api/size (file bytes, snapshot-pinned bytes, vector bytes from the record count and veccol's entry size and per-page count, the rest as records and indexes, marker-only turn count). Every route's response carries brain: 'project' now, and the loader keeps a list of brains of one, so 4b adds brains without changing any shape. Unverified SECURITY findings show as today. THE TESTS: tests/inspect_cli.rs for each new route, the default tab, the hash fallbacks, the brain field, the brand-color check, and that no route writes; the acceptance fixture still loads. Docs: the crate README's inspect section, CHANGELOG, and the guide only if it describes the page. Not in scope: attached brains themselves (4b), any write, a build step. The Worker attaches screenshots of both themes at 1280 and 390 px to the PR.
+```
+
+## 01M84Z55ZCDTE32PF15W0KY61S
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `spec.v0212-inspect`
+- scope: private
+- created: 2026-11-23T19:47:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"spec.v0212-inspect","_mnemo.supersedes":"01M80ZWC2YE1PGCGN8QR63XRE1"}`
+
+```text
+spec.v0212-inspect (planner-a, 2026-11-21; decision.inspect-refresh, decision.brand, the user approved the mockup 2026-11-21). v0.21.2, a patch after v0.21.1: mnemo inspect on brand, with an overview first and a brain picker that attached brains (roadmap 4b) fills later. Starting it needs the user's go at the time. The approved mockup is in the repo: docs/design/inspect-refresh/overview-light.dc.html and attached-brains-dark.dc.html (Design-canvas files: read their markup and the data in renderVals for layout, copy and colors; they are not the page). Check every claim against live code first and report any that's wrong. THE PAGE (mnemo/src/bin/mnemo/inspect.html): (1) Colors only from docs/brand.md's tokens, as CSS variables named as there (--bg, --surface, --ink, --ink-2, --ink-3, --line, --line-2, --accent, --accent-ink, --accent-tint, --on-accent, --amber, --amber-tint, --mono and --sans stacks, --radius 12px, --radius-sm 8px), light by default, dark under prefers-color-scheme guarded by :root:not([data-theme=light]) and under :root[data-theme=dark]; a theme button (aria-label) that sets data-theme, remembered in localStorage inside try/catch. A test checks that every hex color in inspect.html is one of brand.md's, except the mark's four fixed colors. (2) The mark inline (docs/img/logo.svg's paths, 28 px, never in a box, no shadow), the wordmark MNemo (700, letter-spacing -0.02em, --ink) and 'inspect' beside it in --ink-3; title 'MNemo inspect'. (3) Header: the mark, a Brain picker (a labelled select, one entry now: 'project brain' and its path relative to the repo, or the file name), a 'read-only view' badge, the read time, the theme button, Reload. (4) Tabs: Overview (new, the default, and #overview), Memories, Keyed history, Threads, Tasks, Findings, Messages (new), Snapshots, About; the old hashes keep working. (5) Overview, in this order: six tiles (facts; saved turns, with how many hold real text; tasks open with active, blocked and queued, and done; findings open by status, and verified; messages unread and delivered; essence items); Needs attention (active and blocked tasks with their owner, queued tasks, merge conflicts from v0.21.0's flags and copies, or 'none', and stale records by mnemo stale's rules, or 'nothing stale'); Agents (presence: name, role, alive or not, and its active task); Where the space goes (one bar and a legend: vectors, records and indexes, snapshot history, in MB, with the placeholder-turn note when marker-only turns are more than a quarter of the turns, naming how many and their vector bytes); Recent changes (the 10 newest facts, decisions, statuses, messages and task moves, with time, kind, key or slug, and a one-line text). (6) Messages tab: from, to, subject (the pointer), delivery state, refs, time; filters by agent and state. (7) Real buttons, labels and inputs, 44 px targets, text contrast 4.5:1 in both themes, works at 390 px wide (the header and tabs wrap, tables scroll in a box). THE SERVER (inspect.rs): GET-only as now, read once and close, brain text into text nodes only. New routes: /api/overview (the tiles' counts, the attention lists, the recent list), /api/messages, /api/presence, /api/size (file bytes, snapshot-pinned bytes, vector bytes from the record count and veccol's entry size and per-page count, the rest as records and indexes, marker-only turn count). Every route's response carries brain: 'project' now, and the loader keeps a list of brains of one, so 4b adds brains without changing any shape. Unverified SECURITY findings show as today. THE TESTS: tests/inspect_cli.rs for each new route, the default tab, the hash fallbacks, the brain field, the brand-color check, and that no route writes; the acceptance fixture still loads. Docs: the crate README's inspect section, CHANGELOG, and the guide only if it describes the page. Not in scope: attached brains themselves (4b), any write, a build step. The Worker attaches screenshots of both themes at 1280 and 390 px to the PR. Added 2026-11-23 from REV-019.1 and .3: conflicts. A flagged record gets a badge on every tab (Memories, Keyed history, Tasks, Findings, Overview's Needs attention), and a conflict copy is shown paired with its winner side by side, each with a readable origin (which input, its time) instead of raw ids in JSON. The CLI gets mnemo conflicts, a checklist of unsettled conflicts with the command that settles each; recall marks a conflict copy as one.
 ```
 
 ## 01M7T8MPYWH528MY8WC0AYSD8Y
@@ -4286,6 +5246,34 @@ status.discoverability (planner-a, 2026-11-18): the user ran gh repo edit. Verif
 status.discoverability (planner-a, 2026-11-19): done: the repo description ("Shared memory for your coding agents, in one encrypted file. Written in Rust.") and 16 topics (user, 2026-11-18); the custom social preview (user uploaded docs/img/social-preview.png 2026-11-19; gh graphql usesCustomOpenGraphImage true); crates.io and PyPI descriptions and keywords merged (v0200-d2, live with the v0.20.0 publish); the MCP registry bundle and server.json merged (v0200-d3; hardening v0200-d3h). Open: v0200-d4 the demo GIF; README badges and the GIF's placement in the Planner's v0.20.0 version-text hand-off; after the tag, the user's mcp-publisher login and publish (RELEASING.md). No launch day for now (user).
 ```
 
+## 01M873774H1WRQ6QS4BP04V2WV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gap-g16`
+- scope: private
+- created: 2026-11-24T15:36:33Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.first_hlc":1795534593169,"_mnemo.hlc":1795534593169,"_mnemo.key":"status.dogfood-gap-g16","_mnemo.ver":1707595187991722990}`
+
+```text
+G16 (planner-a, 2026-11-24, found at v0210-6; adds to status.dogfood-gaps): after a new mnemo binary is installed, macOS asks again for the keychain (KEYCHAIN-REPROMPT), and test/scripts/project_memory.py's reads_the_brain check treats the CLI's timeout while that prompt is open as 'this build has no keychain', so worker-a's report write failed with a misleading reason until the prompt was approved and it retried. The WAITING post and task update landed first, so the Planner saw a WAITING whose report key had no live version. Fix candidates (the Worker's file, with the next release): tell a timeout apart from a build without the keychain feature and say 'approve the keychain prompt'; and write the report before the task update and post (AGENTS.md rule 6's order).
+```
+
+## 01M87767S3THHKQPA2XRVYAABD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gap-g17`
+- scope: private
+- created: 2026-11-24T16:45:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.first_hlc":1795538755363,"_mnemo.hlc":1795538755363,"_mnemo.key":"status.dogfood-gap-g17","_mnemo.ver":1273880626302601522}`
+
+```text
+G17 (planner-a, 2026-11-24, found at v0210-6b; adds to status.dogfood-gaps): a task's order can't be changed once it's added. task update has no --after, and task next takes no slug, though AGENTS.md's Worker rule 1 says 'mnemo task next (or the slug a pointer names)'. When the Planner put v0210-6b in front of v0210-7 (whose after named v0210-6), task next gave worker-a v0210-7 first, and worker-a had to take it and set it back to queued twice to reach 6b. Candidates for a later release (the user picks the timing): task update --after <slug> for the Planner (the adding role), and task take <slug> (or next --slug) for the Worker.
+```
+
 ## 01M7XFZES1HDEDMSYHC6AVHQW9
 
 - type: episodic
@@ -4308,10 +5296,80 @@ status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prev
 - scope: private
 - created: 2026-11-21T02:14:28Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.dogfood-gaps","_mnemo.supersedes":"01M7XFZES1HDEDMSYHC6AVHQW9"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795278754,"_mnemo.key":"status.dogfood-gaps","_mnemo.superseded_by":"01M7ZF7MHD7WJ2XM6WDYF82PSR","_mnemo.supersedes":"01M7XFZES1HDEDMSYHC6AVHQW9"}`
 
 ```text
 status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve. G10 (found 2026-11-20 on 0.20.1, a correctness gap): essence render --project silently drops items. mnemo/src/store/essence.rs:371-421 gives each section a fixed share of the 6,144-byte budget (next gets 1/12, 490 bytes), never passes unused bytes on, and folds only the timeline; so the project render was 1,268 bytes but showed 5 of 7 items, with no '+N more'. The order isn't deterministic either: items with the same created_at second sort by catalog order, which changed between runs (4 different md5s in 6 runs), so which item dropped changed. Workaround applied: next consolidated to one item. For v0.20.2: unused share flows to later sections, a '+N more (essence render --budget N)' line for any section that's cut, and a tie-break by id. User answers (2026-11-20, decision.v0202-use-what-we-built): v0.20.2 yes; G6 brain-only pointers yes as a trial; G5 explained, pending.
+```
+
+## 01M7ZF7MHD7WJ2XM6WDYF82PSR
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gaps`
+- scope: private
+- created: 2026-11-21T16:32:34Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795287964,"_mnemo.key":"status.dogfood-gaps","_mnemo.superseded_by":"01M7ZR0PRZ3DZNA6NFAKSGPG3W","_mnemo.supersedes":"01M7XY4DKMVKWG5V0M6PKE88CD"}`
+
+```text
+status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve. G10 (found 2026-11-20 on 0.20.1, a correctness gap): essence render --project silently drops items. mnemo/src/store/essence.rs:371-421 gives each section a fixed share of the 6,144-byte budget (next gets 1/12, 490 bytes), never passes unused bytes on, and folds only the timeline; so the project render was 1,268 bytes but showed 5 of 7 items, with no '+N more'. The order isn't deterministic either: items with the same created_at second sort by catalog order, which changed between runs (4 different md5s in 6 runs), so which item dropped changed. Workaround applied: next consolidated to one item. For v0.20.2: unused share flows to later sections, a '+N more (essence render --budget N)' line for any section that's cut, and a tie-break by id. User answers (2026-11-20, decision.v0202-use-what-we-built): v0.20.2 yes; G6 brain-only pointers yes as a trial; G5 explained, pending. G11 (found 2026-11-21, v0.20.2): a session with no waiter misses brain-post pointers, and nothing tells it. reviewer-b, idle between reviews, had no mnemo wait running when READ: v0210-spec-review was posted (no 'mnemo wait --as reviewer-b' process; its MCP server was current, 0.20.2 from 00:11), so the pointer went by SendMessage. Cause: the waiter is a background command each session must start and restart after each wake; a session that was idle when the protocol changed (2026-11-20), or whose waiter exited, has none, and the SessionStart and UserPromptSubmit hooks don't check. Product fix, proposed for smarter memory (roadmap step 4): the hook brief says 'no waiter is running for <agent>: start mnemo wait' when MNEMO_AGENT is set and no live waiter holds the agent (mnemo wait already records itself, since exit 4 means a newer one took over); and mnemo post says when the receiver has no live waiter, so the sender knows to use the fallback at once. Interim: the Planner checks ps for each session's waiter before posting to it.
+```
+
+## 01M7ZR0PRZ3DZNA6NFAKSGPG3W
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gaps`
+- scope: private
+- created: 2026-11-21T19:06:04Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795302604,"_mnemo.key":"status.dogfood-gaps","_mnemo.superseded_by":"01M805ZG2MX7NZZ5BX0P79R06W","_mnemo.supersedes":"01M7ZF7MHD7WJ2XM6WDYF82PSR"}`
+
+```text
+status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve. G10 (found 2026-11-20 on 0.20.1, a correctness gap): essence render --project silently drops items. mnemo/src/store/essence.rs:371-421 gives each section a fixed share of the 6,144-byte budget (next gets 1/12, 490 bytes), never passes unused bytes on, and folds only the timeline; so the project render was 1,268 bytes but showed 5 of 7 items, with no '+N more'. The order isn't deterministic either: items with the same created_at second sort by catalog order, which changed between runs (4 different md5s in 6 runs), so which item dropped changed. Workaround applied: next consolidated to one item. For v0.20.2: unused share flows to later sections, a '+N more (essence render --budget N)' line for any section that's cut, and a tie-break by id. User answers (2026-11-20, decision.v0202-use-what-we-built): v0.20.2 yes; G6 brain-only pointers yes as a trial; G5 explained, pending. G11 (found 2026-11-21, v0.20.2): a session with no waiter misses brain-post pointers, and nothing tells it. reviewer-b, idle between reviews, had no mnemo wait running when READ: v0210-spec-review was posted (no 'mnemo wait --as reviewer-b' process; its MCP server was current, 0.20.2 from 00:11), so the pointer went by SendMessage. Cause: the waiter is a background command each session must start and restart after each wake; a session that was idle when the protocol changed (2026-11-20), or whose waiter exited, has none, and the SessionStart and UserPromptSubmit hooks don't check. Product fix, proposed for smarter memory (roadmap step 4): the hook brief says 'no waiter is running for <agent>: start mnemo wait' when MNEMO_AGENT is set and no live waiter holds the agent (mnemo wait already records itself, since exit 4 means a newer one took over); and mnemo post says when the receiver has no live waiter, so the sender knows to use the fallback at once. Interim: the Planner checks ps for each session's waiter before posting to it. G12 (found 2026-11-21, report.site-1): task next always takes the oldest queued task, and there is no take-by-slug, though AGENTS.md's Worker rule 1 says to take 'the slug a pointer names'. worker-a took v0210-2 by mistake, put it back to queued, and ran task next again. Fix, for smarter memory: mnemo task take <slug> (and the MCP task op), refusing a task whose after isn't done or that's for another role.
+```
+
+## 01M805ZG2MX7NZZ5BX0P79R06W
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gaps`
+- scope: private
+- created: 2026-11-21T23:10:04Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795304140,"_mnemo.key":"status.dogfood-gaps","_mnemo.superseded_by":"01M807EBYK0DVQAM0W93Y7TD0D","_mnemo.supersedes":"01M7ZR0PRZ3DZNA6NFAKSGPG3W"}`
+
+```text
+status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve. G10 (found 2026-11-20 on 0.20.1, a correctness gap): essence render --project silently drops items. mnemo/src/store/essence.rs:371-421 gives each section a fixed share of the 6,144-byte budget (next gets 1/12, 490 bytes), never passes unused bytes on, and folds only the timeline; so the project render was 1,268 bytes but showed 5 of 7 items, with no '+N more'. The order isn't deterministic either: items with the same created_at second sort by catalog order, which changed between runs (4 different md5s in 6 runs), so which item dropped changed. Workaround applied: next consolidated to one item. For v0.20.2: unused share flows to later sections, a '+N more (essence render --budget N)' line for any section that's cut, and a tie-break by id. User answers (2026-11-20, decision.v0202-use-what-we-built): v0.20.2 yes; G6 brain-only pointers yes as a trial; G5 explained, pending. G11 (found 2026-11-21, v0.20.2): a session with no waiter misses brain-post pointers, and nothing tells it. reviewer-b, idle between reviews, had no mnemo wait running when READ: v0210-spec-review was posted (no 'mnemo wait --as reviewer-b' process; its MCP server was current, 0.20.2 from 00:11), so the pointer went by SendMessage. Cause: the waiter is a background command each session must start and restart after each wake; a session that was idle when the protocol changed (2026-11-20), or whose waiter exited, has none, and the SessionStart and UserPromptSubmit hooks don't check. Product fix, proposed for smarter memory (roadmap step 4): the hook brief says 'no waiter is running for <agent>: start mnemo wait' when MNEMO_AGENT is set and no live waiter holds the agent (mnemo wait already records itself, since exit 4 means a newer one took over); and mnemo post says when the receiver has no live waiter, so the sender knows to use the fallback at once. Interim: the Planner checks ps for each session's waiter before posting to it. G12 (found 2026-11-21, report.site-1): task next always takes the oldest queued task, and there is no take-by-slug, though AGENTS.md's Worker rule 1 says to take 'the slug a pointer names'. worker-a took v0210-2 by mistake, put it back to queued, and ran task next again. Fix, for smarter memory: mnemo task take <slug> (and the MCP task op), refusing a task whose after isn't done or that's for another role. G13 (found 2026-11-21, planning the brain backup): there is no safe way to copy a brain off the machine. The CLI has no backup or copy command (mnemo --help on 0.20.2: compact rebuilds in place, export is plaintext), and a plain cp of .git/mnemo/project.mnemo while sessions write can catch a half-written file. The brain is 58 MB, encrypted, and its key is only in this Mac's keychain (mnemo recovery-code shows it). Fix, proposed after v0.21.0 with the repo cleanup: mnemo backup <out>, a consistent copy taken under the read lock, synced and put in place atomically, that refuses an output inside the repo; the guide says to keep the recovery code apart from the backup.
+```
+
+## 01M807EBYK0DVQAM0W93Y7TD0D
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gaps`
+- scope: private
+- created: 2026-11-21T23:35:40Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795431100,"_mnemo.key":"status.dogfood-gaps","_mnemo.superseded_by":"01M840GVW8QFJJ7GZZQX39P2T3","_mnemo.supersedes":"01M805ZG2MX7NZZ5BX0P79R06W"}`
+
+```text
+status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve. G10 (found 2026-11-20 on 0.20.1, a correctness gap): essence render --project silently drops items. mnemo/src/store/essence.rs:371-421 gives each section a fixed share of the 6,144-byte budget (next gets 1/12, 490 bytes), never passes unused bytes on, and folds only the timeline; so the project render was 1,268 bytes but showed 5 of 7 items, with no '+N more'. The order isn't deterministic either: items with the same created_at second sort by catalog order, which changed between runs (4 different md5s in 6 runs), so which item dropped changed. Workaround applied: next consolidated to one item. For v0.20.2: unused share flows to later sections, a '+N more (essence render --budget N)' line for any section that's cut, and a tie-break by id. User answers (2026-11-20, decision.v0202-use-what-we-built): v0.20.2 yes; G6 brain-only pointers yes as a trial; G5 explained, pending. G11 (found 2026-11-21, v0.20.2): a session with no waiter misses brain-post pointers, and nothing tells it. reviewer-b, idle between reviews, had no mnemo wait running when READ: v0210-spec-review was posted (no 'mnemo wait --as reviewer-b' process; its MCP server was current, 0.20.2 from 00:11), so the pointer went by SendMessage. Cause: the waiter is a background command each session must start and restart after each wake; a session that was idle when the protocol changed (2026-11-20), or whose waiter exited, has none, and the SessionStart and UserPromptSubmit hooks don't check. Product fix, proposed for smarter memory (roadmap step 4): the hook brief says 'no waiter is running for <agent>: start mnemo wait' when MNEMO_AGENT is set and no live waiter holds the agent (mnemo wait already records itself, since exit 4 means a newer one took over); and mnemo post says when the receiver has no live waiter, so the sender knows to use the fallback at once. Interim: the Planner checks ps for each session's waiter before posting to it. G12 (found 2026-11-21, report.site-1): task next always takes the oldest queued task, and there is no take-by-slug, though AGENTS.md's Worker rule 1 says to take 'the slug a pointer names'. worker-a took v0210-2 by mistake, put it back to queued, and ran task next again. Fix, for smarter memory: mnemo task take <slug> (and the MCP task op), refusing a task whose after isn't done or that's for another role. G13 (found 2026-11-21, planning the brain backup): there is no safe way to copy a brain off the machine. The CLI has no backup or copy command (mnemo --help on 0.20.2: compact rebuilds in place, export is plaintext), and a plain cp of .git/mnemo/project.mnemo while sessions write can catch a half-written file. The brain is 58 MB, encrypted, and its key is only in this Mac's keychain (mnemo recovery-code shows it). Fix, proposed after v0.21.0 with the repo cleanup: mnemo backup <out>, a consistent copy taken under the read lock, synced and put in place atomically, that refuses an output inside the repo; the guide says to keep the recovery code apart from the backup. G14 (found 2026-11-21, sizing the brain for backup, v0.20.2): saved marker-only turns are most of the file. The brain is 60.6 MB with 32,927 records: 32,092 saved turns (97%), and 27,388 of those are marker-only ([thinking], [tool_use name=...]; median turn 20 bytes), which recall never returns. Every record takes a 772-byte fp16 column entry (veccol.rs, 10 per 8 KiB page), the marker-only ones the sentinel vector (threads.rs:369): the column is about 27 MB, about 22 MB of it identical placeholders. Snapshots pin 10.9 MB (139 retained); all turn text is 3.25 MB, all fact text 0.48 MB. Growth is about 1.5 KB per record whatever its size, about 3,500 turn records a day across our sessions since 2026-11-13, so about 5 MB a day. Proposed fix, for smarter memory (roadmap step 4), the user's call: the save folds each run of marker-only entries into the turn before it, or into one record per run, keeping the transcript lossless, and a compaction folds existing ones; with it the file would be roughly 40-60% smaller (an estimate, to be measured on a copy).
+```
+
+## 01M840GVW8QFJJ7GZZQX39P2T3
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gaps`
+- scope: private
+- created: 2026-11-23T10:51:40Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.dogfood-gaps","_mnemo.supersedes":"01M807EBYK0DVQAM0W93Y7TD0D"}`
+
+```text
+status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve. G10 (found 2026-11-20 on 0.20.1, a correctness gap): essence render --project silently drops items. mnemo/src/store/essence.rs:371-421 gives each section a fixed share of the 6,144-byte budget (next gets 1/12, 490 bytes), never passes unused bytes on, and folds only the timeline; so the project render was 1,268 bytes but showed 5 of 7 items, with no '+N more'. The order isn't deterministic either: items with the same created_at second sort by catalog order, which changed between runs (4 different md5s in 6 runs), so which item dropped changed. Workaround applied: next consolidated to one item. For v0.20.2: unused share flows to later sections, a '+N more (essence render --budget N)' line for any section that's cut, and a tie-break by id. User answers (2026-11-20, decision.v0202-use-what-we-built): v0.20.2 yes; G6 brain-only pointers yes as a trial; G5 explained, pending. G11 (found 2026-11-21, v0.20.2): a session with no waiter misses brain-post pointers, and nothing tells it. reviewer-b, idle between reviews, had no mnemo wait running when READ: v0210-spec-review was posted (no 'mnemo wait --as reviewer-b' process; its MCP server was current, 0.20.2 from 00:11), so the pointer went by SendMessage. Cause: the waiter is a background command each session must start and restart after each wake; a session that was idle when the protocol changed (2026-11-20), or whose waiter exited, has none, and the SessionStart and UserPromptSubmit hooks don't check. Product fix, proposed for smarter memory (roadmap step 4): the hook brief says 'no waiter is running for <agent>: start mnemo wait' when MNEMO_AGENT is set and no live waiter holds the agent (mnemo wait already records itself, since exit 4 means a newer one took over); and mnemo post says when the receiver has no live waiter, so the sender knows to use the fallback at once. Interim: the Planner checks ps for each session's waiter before posting to it. G12 (found 2026-11-21, report.site-1): task next always takes the oldest queued task, and there is no take-by-slug, though AGENTS.md's Worker rule 1 says to take 'the slug a pointer names'. worker-a took v0210-2 by mistake, put it back to queued, and ran task next again. Fix, for smarter memory: mnemo task take <slug> (and the MCP task op), refusing a task whose after isn't done or that's for another role. G13 (found 2026-11-21, planning the brain backup): there is no safe way to copy a brain off the machine. The CLI has no backup or copy command (mnemo --help on 0.20.2: compact rebuilds in place, export is plaintext), and a plain cp of .git/mnemo/project.mnemo while sessions write can catch a half-written file. The brain is 58 MB, encrypted, and its key is only in this Mac's keychain (mnemo recovery-code shows it). Fix, proposed after v0.21.0 with the repo cleanup: mnemo backup <out>, a consistent copy taken under the read lock, synced and put in place atomically, that refuses an output inside the repo; the guide says to keep the recovery code apart from the backup. G14 (found 2026-11-21, sizing the brain for backup, v0.20.2): saved marker-only turns are most of the file. The brain is 60.6 MB with 32,927 records: 32,092 saved turns (97%), and 27,388 of those are marker-only ([thinking], [tool_use name=...]; median turn 20 bytes), which recall never returns. Every record takes a 772-byte fp16 column entry (veccol.rs, 10 per 8 KiB page), the marker-only ones the sentinel vector (threads.rs:369): the column is about 27 MB, about 22 MB of it identical placeholders. Snapshots pin 10.9 MB (139 retained); all turn text is 3.25 MB, all fact text 0.48 MB. Growth is about 1.5 KB per record whatever its size, about 3,500 turn records a day across our sessions since 2026-11-13, so about 5 MB a day. Proposed fix, for smarter memory (roadmap step 4), the user's call: the save folds each run of marker-only entries into the turn before it, or into one record per run, keeping the transcript lossless, and a compaction folds existing ones; with it the file would be roughly 40-60% smaller (an estimate, to be measured on a copy). G15 (found 2026-11-23, v0210-3 report deviation (5)): on this Mac the full mnemo-python/test_mnemo.py stops at test_index_and_snapshots (assert db.has_index()), the same on the unchanged base wheel (43969c9); CI's Linux python job runs the whole script and passes. A macOS-only failure in a test of the published Python package; after v0.21.0, find whether it's the test or the engine.
 ```
 
 ## 01M7XF61YHCMXVE1YBHFYBFRAH
@@ -4368,6 +5426,20 @@ status.mcp-recall-vectors (planner-a, 2026-11-19, dogfood; raised by REVIEWER-B 
 
 ```text
 status.metrics (planner-a, 2026-11-19, baseline before v0.20.0): GitHub: 2 stars, 0 forks, 0 watchers, 0 issues; views 14 days 201 total / 22 unique (one 62-view day 11-15 from 1 visitor); clones 12,668 / 746 unique (mostly CI runners); referrers aocr.org 7, github.com 4, toarchkumar.github.io 3; release assets about 16-24 downloads per release. crates.io mnemo-engine: 814 total, 796 in 90 days, 12-31 a day. PyPI mnemo-engine (pypistats, no mirrors): 7,751 last month, 4,064 last week; 7,596 of 8,674 have no OS or Python version (bots, scanners, caches); with an OS: Linux 689, macOS 387, Windows 2. Our CI does not pip install from PyPI. No launch yet (user decision).
+```
+
+## 01M7ZDJXA5H372XXC0EJEAP777
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.plugin-directories`
+- scope: private
+- created: 2026-11-21T16:03:46Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.plugin-directories"}`
+
+```text
+Plugin directories outside Anthropic (planner-a research, web, 2026-11-21; nothing submitted). GOOGLE: (1) Antigravity Plugin Marketplace (launched 2026-10-29): plugin.json with skills, MCP servers (local stdio allowed), rules, hooks; agy plugin install <github url> works without a listing; listing = agy plugin validate --strict, then an interest form (antigravity.google/docs/marketplace); unclear whether non-partners are accepted. (2) Gemini CLI extensions gallery: self-serve, a public repo with the gemini-cli-extension topic and gemini-extension.json at its root, listed by a daily crawler; stdio, hooks, skills supported; audience shrinking (Gemini CLI replaced by Antigravity CLI for free tiers, 2026-06-18); Antigravity can import Gemini extensions. (3) Gemini Code Assist: no store; Gemini Enterprise gallery: partners, hosted agents only. OPENAI: one Plugin Directory for ChatGPT and Codex (platform.openai.com/plugins): identity verification; hooks must be removed; local MCP only for approved partners via an OpenAI representative, desktop-app only; remote needs HTTPS, domain check, demo video. A self-hosted Codex marketplace (.agents/plugins/marketplace.json, codex plugin marketplace add owner/repo) needs no review. ChatGPT apps/connectors: remote only. Fit for us: Antigravity best (and it's where reviewer-a runs), Gemini CLI easiest, OpenAI weakest (no hooks, partner allowlist).
 ```
 
 ## 01M7XZVDPZH3BKR9BC7FJKX7MT
@@ -4706,6 +5778,20 @@ status.v0200-review-scope (planner-a, 2026-11-19): items for REVIEWER-B's scoped
 status.v0201-wait-bound (user, 2026-11-19, answering RB-017.2): keep the existing wake limits for mnemo wait (up to 12 wake-ups an hour per agent, at least 60 s apart, mnemo wake pause stops all). Editors that wait in the foreground (Antigravity, Cursor) stop re-running after 1 hour with no work and say so.
 ```
 
+## 01M7ZDNZB0F1RMX9J0769Q9G0J
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.v0210-needs-user`
+- scope: private
+- created: 2026-11-21T16:05:27Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.v0210-needs-user"}`
+
+```text
+NEEDS-USER (planner-a 2026-11-21), v0.21.0 merge, from RB-019 (6 of 8 findings accepted into spec.v0210 rev 2; v0210-2 held): (1) RB-019.2, the delete rule: id-level (a delete removes exactly the record it named, always; a newer version the deleting copy never saw stays, and the report names the key) [Planner recommends] vs newest-action-wins by key (sync.md section 7; needs one more marker field, and a copy with a fast clock can delete the other's later writes). (2) RB-019.6, brain identity: same brain if the salts match or both have the same manifest ULID, so a rekeyed copy can still merge (the second input then needs its own secret) [Planner recommends] vs salts must match (a rekeyed copy can never be merged). Also open: the plugin listings plan (status.plugin-directories).
+```
+
 ## 01M7NT5YYT1X243FM6KGJ4RZQ5
 
 - type: procedural
@@ -4718,6 +5804,66 @@ status.v0201-wait-bound (user, 2026-11-19, answering RB-017.2): keep the existin
 
 ```text
 Mixed-version tests against a published CLI: tests/v0_16_compat.rs (MNEMO_V0_16_1_BIN) and tests/v0_17_compat.rs (MNEMO_V0_17_2_BIN, since v0.18.0 PR 129) skip unless the env var names the old binary; CI's compat (v0.16.1|v0.17.2, linux) jobs cargo install the exact version into $RUNNER_TEMP. Locally, v0_17_compat runs against the installed ~/.local/bin/mnemo (any 0.17.x) on a temp file with a test passphrase, never the keychain.
+```
+
+## 01M80ZWND2XA1FJ8W3JWXSKRYZ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-22T06:42:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["docs/design/inspect-refresh/overview-light.dc.html","docs/design/inspect-refresh/attached-brains-dark.dc.html"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"handoff-inspect-mockup","_mnemo.status":"done","_mnemo.status_history":[{"at":1795421639,"by":"worker-a","from":"queued","to":"active"},{"at":1795421640,"by":"worker-a","from":"active","note":"report.handoff-inspect-mockup","to":"ready"},{"at":1795421661,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED 9dfd95b on origin/release-0.21.0: exactly the two docs/design/inspect-refresh/ files (320 insertions), message as given, no code.","to":"done"}]}`
+
+```text
+Hand-off: the approved inspect mockup (docs, for v0.21.2)
+
+Planner-owned, user-requested design docs (decision.inspect-refresh, spec.v0212-inspect). Commit exactly these two new files, as their own commit, on the release branch you're on, no code in the commit: docs/design/inspect-refresh/overview-light.dc.html and docs/design/inspect-refresh/attached-brains-dark.dc.html. Message: 'docs: the approved mnemo inspect mockup, for v0.21.2 (decision.inspect-refresh)'. Report the hash in report.handoff-inspect-mockup. Take it between merge steps when convenient; it doesn't hold v0.21.0.
+```
+
+## 01M83N46JD2FBE66G4JCQNVT2A
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T07:32:30Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["handoff-inspect-mockup"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.slug":"handoff-readme-lead","_mnemo.status":"done","_mnemo.status_history":[{"at":1795423429,"by":"worker-a","from":"queued","to":"active"},{"at":1795423429,"by":"worker-a","from":"active","note":"report.handoff-readme-lead","to":"ready"},{"at":1795423442,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED 43969c9 on origin/release-0.21.0: exactly README.md and index.html, the diff equals planner-a's edits (no working-tree diff left), message as given. Goes live when the v0.21.0 tag fast-forwards main.","to":"done"}]}`
+
+```text
+Hand-off: README opening and landing-page badge (planner-a)
+
+First step: recall. Planner-owned files, edited by planner-a with the user's approval (2026-11-22): README.md (the opening: replaces the CLAUDE.md junk drawer and the notes folder; no 'Written in Rust') and index.html (the facts row: 'Memory-safe core, no unsafe code'). Commit exactly these two paths as their own commit, never mixed with merge code, with the message: 'docs: lead with what MNemo replaces, not the language it is written in'. Cite the hash in report.handoff-readme-lead and post DONE to planner-a.
+```
+
+## 01M84Z5FC6K46J0KJRMMCF8TEQ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:47:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-5f"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"handoff-sync-md","_mnemo.status":"done","_mnemo.status_history":[{"at":1795510631,"by":"worker-a","from":"queued","to":"active"},{"at":1795510763,"by":"worker-a","from":"active","note":"report.handoff-sync-md","to":"ready"},{"at":1795510771,"by":"planner-a","from":"ready","note":"VERIFIED 2026-11-24: PR #184 squash-merged as 8b277f7 on release-0.21.0, docs/design/sync.md only; the committed file equals my edit (no diff against the tree).","to":"done"}]}`
+
+```text
+Hand-off: docs/design/sync.md section 7 to the shipped merge rules (planner-a)
+
+First step: recall. Planner-owned design note, edited by planner-a (REV-019.4 (3)). Commit exactly docs/design/sync.md as its own commit, never mixed with code, with the message: 'docs(sync): section 7 follows the merge rules v0.21.0 ships (REV-019.4)'. Cite the hash in report.handoff-sync-md and post DONE to planner-a.
+```
+
+## 01M84TZ84Y1QTGPZ5QFVPZ35HP
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T18:33:54Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"reviewer-b","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"reviewer","_mnemo.seen_by":["reviewer-b"],"_mnemo.slug":"rb-020","_mnemo.status":"done","_mnemo.status_history":[{"at":1795458846,"by":"reviewer-b","from":"queued","to":"active"},{"at":1795458847,"by":"planner-a","from":"active","note":"planner-a 2026-11-23: READ: rb-020 posted (01M84TZ8CNRXE8NS73S8D15A8N) and sent by SendMessage at once: no mnemo wait --as reviewer-b was running (G11).","to":"active"},{"at":1795460829,"by":"reviewer-b","from":"active","note":"reviewer-b 2026-11-23, RB-020 done at 8b52e90, in my own clone (/tmp/rb-mnemo, re-cloned: the old one had been cleaned from /tmp), CARGO_TARGET_DIR=/tmp/rb-target, --locked, no benchmarks. RECALL: found spec.v0210 rev 2, the five decisions the task names, decision.v0210-reviews, report.v0210-2, -3, -3b, -4, -4c; REV-017.1 to .3 read and not re-raised. VERDICT: hold the tag for RB-020.1, and I'd fix .2 and .3 in the same round. Six findings, all open. HIGH RB-020.1: a key whose version was written before v0.21 and then superseded by v0.21 gets its old value back as live after any merge, merge(x, x) included, with nothing reported (confirmed with a file from the published v0.20.2 engine). MEDIUM RB-020.2: a delete with no marker is applied once and not kept, so merging the output again with the copy that holds the record brings it back (the committed fixtures show it). MEDIUM RB-020.3: after the user forgets or edits the record that won a conflict, the next merge drops the conflict copy without saying so; merge(x, x) != x. MEDIUM RB-020.4: the proptests hold for what they generate (384 cases passed here) but never make an older build's record, a markerless delete or a write on an output, which is why .1 to .3 passed them; twelve ops listed. MEDIUM RB-020.5: v0.21's first edit of any older record shows as a conflict with a copy; put could record what it edited; the reserved keys are otherwise sound (a caller can't forge them). LOW RB-020.6: the data-key test proves nothing though the code is right, the second copy's passphrase has only a flag and an error that doesn't name it, a dead branch, the non-atomic copy fallback, a keyed manifest written in both copies. BY SCOPE ITEM: (1) .1 to .4; (2) .2, .3, turns under other ids are removed in every grouping; (3) .5; (4) .6 item 3, nothing lost by the by-value rewrite; (5) and (6) sound, .6 items 1, 2, 4; (7) .6 items 2 and 7. RAN: the five merge test files with failpoints (87 passed, 1 ignored), proptest_merge at 384 cases (6 passed, 121 s), 13 probes of my own in an untracked test file in my clone, the CLI merge on scratch copies with flags only (no key store, not the installed mnemo, not the project brain). NOT DONE: the full suite, clippy, the Python tests, Windows; the 25 saved cases' mapping wasn't re-derived; RB-016, RB-017 and RB-018 findings weren't verified against their release tags (outside this scope).","to":"ready"},{"at":1795460873,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: triaged with the code checked: RB-020.1-.6 all accepted, into v0210-5f (RB-020.4 ops 4-12 to the backlog). Thorough pass; .1 would have hit our own brain at the RC.","to":"done"}]}`
+
+```text
+REVIEWER-B: the v0.21.0 merge at READY (batch RB-020)
+
+First step: recall. Code: origin/release-0.21.0 at 8b52e90 (mnemo/src/store/merge.rs and its callers in keyed.rs, records.rs, crud.rs, the CLI's merge command, inspect, the Python merge_files). Build with CARGO_TARGET_DIR=/tmp/rb-target and --locked; no benchmarks (worker-a has the READY PR). Scope, per decision.v0210-reviews: the built merge against spec.v0210 rev 2 as amended by decision.v0210-merge-rules, decision.v0210-ancestry, decision.v0210-conflict-flags, decision.v0210-chain-rule and decision.v0210-task-status. (1) The laws: commutative, idempotent, associative, copies of copies; do the proptests (tests/proptest_merge.rs, the 25 saved cases now as tests) really exercise them, and what op do they lack? (2) Deletes and markers: nothing a marker names survives under any id. (3) The reserved keys _mnemo.first_hlc, merge_linked, merge_status_conflict and tombstone_supersedes: who writes and strips each; can a caller's write or an older build's rewrite forge or keep one wrongly? (4) v0210-3b's by-value rewrite: any path where an input's record is lost or a summary disagrees with the record. (5) The secrets for rekeyed copies (the second input's secret, the key-store lookup) and the new data key. (6) Nothing left behind on a failure, including the no-hard-link fallback. (7) The CLI and Python surfaces, and the v0.20.2 fixtures. Out of scope: code outside the merge, the version bump, benchmarks; REV-017's findings already triaged (read them, don't re-raise). Findings as RB-020.n; set this task ready with a summary and post REVIEW DONE: RB-020 to planner-a.
 ```
 
 ## 01M7TFQQRXBZ9B7PYSHC6676BV
@@ -4748,6 +5894,51 @@ For REVIEWER-A only (REVIEWER-B: leave it). The user called this review on 2026-
 REVIEWER-A: how each editor can be woken and wired (batch REV-014)
 
 First step: recall. Groundwork for roadmap step 2 (more editors) and v0.20.1 (mnemo wait). Read status.cross-editor-wake, spec.v0201-wait and decision.roadmap-order. For each of Codex (CLI and IDE), Google Antigravity, VS Code (Copilot agent mode), Windsurf / Devin Desktop and Cursor, from official docs and release notes (cite each; mark third-party sources as such, and say when you could not confirm): (a) MCP config file locations and scopes, and how a server is added; (b) hooks: which events (session start, per prompt, end of turn), whether an end-of-turn hook can keep the agent going and with what fields and loop limits, and the input it gets; (c) whether anything can wake an idle agent (a background command's exit, a socket, a channel, an API); (d) the terminal tool's timeout for a foreground command, and whether the agent may run background commands; (e) the MCP tool-call timeout; (f) a project-level instructions file (AGENTS.md, rules) it reads. Then try what you can in Antigravity itself, where you run: does a foreground command of a few minutes keep your turn open, and is there any way for an outside event to start a turn? One finding per editor (REV-014.1, ...), category PRODUCT, plus a summary table in ~/mnemo-reviews/REV-014.md. Recommend for each editor the best way to wake it, from the ladder in status.cross-editor-wake. Then set this task ready and post REVIEW DONE: REV-014 to planner-a (mnemo post --as reviewer-a --role reviewer --to planner-a).
+```
+
+## 01M84TZ87V9NFQWNJG1J4JJPG3
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T18:33:54Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"reviewer-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"reviewer","_mnemo.seen_by":["reviewer-b"],"_mnemo.slug":"rev-019","_mnemo.status":"done","_mnemo.status_history":[{"at":1795458848,"by":"planner-a","from":"queued","note":"planner-a 2026-11-23: READ: rev-019 posted (01M84TZ8F1ZDZ6HNA0NZ3FZSTW). reviewer-a (Antigravity) had no waiter running and SendMessage can't reach it; the user is asked to point it at rev-019.","to":"queued"},{"at":1795461320,"by":"reviewer-a","from":"queued","to":"active"},{"at":1795463128,"by":"reviewer-a","from":"active","note":"REV-019.1..REV-019.4 recorded; full report at ~/mnemo-reviews/REV-019.md","to":"ready"},{"at":1795463222,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: triaged: REV-019.1 and .2 accepted into v0210-5g (v0.21.0) with the v0.21.2 parts in spec.v0212-inspect; .3 and .4 deferred to v0.21.2 and step 3; sync.md section 7 updated.","to":"done"}]}`
+
+```text
+REVIEWER-A: the v0.21.0 merge, product scope (batch REV-019)
+
+First step: recall. Product only, no code review (the user's scope, 'Yes, product scope', decision.v0210-reviews). Read report.v0210-4 (the merge of two copies of our brain: the report, the three conflicts and how each shows), mnemo/guide/guide.md's 'Merge two copies', the README and CLI table, and run the installed docs if useful; the branch build is release-0.21.0 at 8b52e90. Questions: (1) Are conflict copies, flags and the merge report something a user can act on? What does a user do next after a merge with conflicts, and is that path there (about, inspect, recall)? (2) The wording of the CLI output, the refusals and the guide. (3) How other tools present a merge of diverged copies: git, Obsidian Sync, Apple Notes, CRDT apps such as Automerge-based ones; what should we borrow? (4) Does the design fit the sync roadmap (change sets, then the paid tier), and REV-017.3's operation-log direction? Not in scope: code correctness and speed (RB-020 and REV-017). Findings as REV-019.n; set this task ready and post REVIEW DONE: REV-019 to planner-a.
+```
+
+## 01M7ZN9DK2MT9KS3VAGSF9Q66Y
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T18:18:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-1b"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["decision.site-publish"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"site-1","_mnemo.status":"done","_mnemo.status_history":[{"at":1795285497,"by":"worker-a","from":"queued","to":"active"},{"at":1795287937,"by":"worker-a","from":"active","note":"report.site-1","to":"blocked"},{"at":1795287963,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-21: checked: PRs 171 (a45ad31) and 172 (543b6b6) MERGED into main, 173 (a81a093) into release-0.21.0; main is an ancestor of release-0.21.0; pages.yml runs on 543b6b6 succeeded (deploy skipped while legacy); /, install.sh, llms.txt, docs/img/demo.gif return 200. Deviations (i)-(iii) accepted. NEEDS-USER told: the Pages source switch.","to":"blocked"},{"at":1795289290,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-21: the user switched Settings > Pages > Source to GitHub Actions ('Done', with a screenshot); checked: the Pages API reports build_type workflow. Run pages.yml and check.","to":"blocked"},{"at":1795289305,"by":"worker-a","from":"blocked","to":"active"},{"at":1795289426,"by":"worker-a","from":"active","note":"report.site-1","to":"ready"},{"at":1795289442,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a 2026-11-21: pages.yml workflow_dispatch run on 543b6b6 succeeded (19:28Z). Live: /, install.sh, install.ps1, llms.txt, llms-full.txt, .claude-plugin/marketplace.json, docs/img/demo.gif, docs/img/inspect-findings.png, sitemap.xml, social-card.png all 200; README.md and AGENTS.md 404 (no longer published, as decided); the live page carries the JSON-LD block. install.sh byte-identical to v0.20.2's and its install checked against SHA256SUMS (94751b68...). Next for the user: Google Search Console.","to":"done"}]}`
+
+```text
+Site: publish through GitHub Actions, site/, sitemap and social card; commit index.html
+
+First step: recall. Read decision.site-publish. (1) A Pages workflow (.github/workflows/pages.yml; actions/configure-pages, upload-pages-artifact, deploy-pages, pinned by SHA like the other workflows) on push to main and workflow_dispatch, that assembles the site from exactly the list in decision.site-publish and nothing else, and fails if any listed file is missing. (2) site/sitemap.xml listing https://toarchkumar.github.io/mnemo/ (the guide pages join it later). (3) site/social-card.png, 1200x630, under 300 KB, in the page's colors and type: the headline 'Your coding agent forgets. Give it a memory.' and 'One encrypted file in your repo.'; no version number on it. (4) Keep every published address working: a test or a check step that the artifact holds install.sh, install.ps1, llms.txt, llms-full.txt, .claude-plugin/marketplace.json, docs/img/demo.gif and inspect-findings.png at their current paths; update RELEASING.md and AGENTS.md's technical row for the install scripts and site files (Pages now publishes an assembled artifact from main). (5) Timing: before the user's switch, legacy Pages keeps serving main; the deploy job must not turn a release or main red before the switch (say how). Target live before v0.21.0 if main stays fast-forwardable by the release tag (for example a PR into main, then main merged into release-0.21.0); otherwise into release-0.21.0. Say which in the report. (6) HAND-OFF: commit index.html (planner-a's SEO edits: title, description, canonical, Open Graph image and Twitter card, JSON-LD) as its own commit: 'docs(site): search title, description, canonical, social card tags and structured data'. Then WAITING for the user's Pages switch; after it, re-run the workflow, check the page, the social card, the sitemap and each install address (install.sh downloads and its SHA-256 matches the release's SHA256SUMS), and report. A later task removes nothing yet. Report: report.site-1; then mnemo post planner-a '<DONE|BLOCKED|WAITING>: site-1'.
+```
+
+## 01M7ZSHP3JJEVCV4MB8JR40ZPG
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T19:32:49Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["decision.site-publish"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"site-2","_mnemo.status":"done","_mnemo.status_history":[{"at":1795289583,"by":"worker-a","from":"queued","to":"active"},{"at":1795291864,"by":"worker-a","from":"active","note":"report.site-2","to":"ready"},{"at":1795291873,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a 2026-11-21: fc8f8f4 on main; main is an ancestor of release-0.21.0; the live file returns 200 with Google's exact line. The user verifies in Search Console and submits sitemap.xml.","to":"done"}]}`
+
+```text
+Site: Google Search Console verification file
+
+Hand-off from planner-a (user-requested, 2026-11-21). Commit exactly site/google83547f5159cbe150.html (planner-a wrote it; its content is Google's, one line, no trailing newline; don't change it) as its own commit into main, message: 'docs(site): Google Search Console verification file'. Then merge main into release-0.21.0 as with site-1, and check that https://toarchkumar.github.io/mnemo/google83547f5159cbe150.html returns 200 with that exact content after pages.yml deploys. Small: do it at your next safe point in v0210-2 (don't switch branches with uncommitted v0210-2 work in the tree; take tree:checkout as usual), then go back to v0210-2. Report: report.site-2; then mnemo post planner-a 'DONE: site-2'.
 ```
 
 ## 01M7N18T0CYF8DA9TSYEZJDC1E
@@ -5783,12 +6974,282 @@ First step: recall. Report: report.<slug>; then send the pointer as a brain post
 - scope: shared
 - created: 2026-11-21T06:52:35Z
 - importance: 0.5
-- metadata: `{"_mnemo.after":["v0202-6"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-7","_mnemo.status":"active","_mnemo.status_history":[{"at":1795247149,"by":"worker-a","from":"queued","to":"active"}]}`
+- metadata: `{"_mnemo.after":["v0202-6"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-7","_mnemo.status":"done","_mnemo.status_history":[{"at":1795247149,"by":"worker-a","from":"queued","to":"active"},{"at":1795248202,"by":"worker-a","from":"active","note":"report.v0202-7","to":"blocked"},{"at":1795248254,"by":"planner-a","from":"blocked","note":"planner-a: the user approved the release deployment for run 44881868646 (2026-11-21). Verified before: origin/main and annotated tag v0.20.2 at 6b47af0; 4529142..v0.20.2 changes docs/brain.md only.","to":"blocked"},{"at":1795248269,"by":"worker-a","from":"blocked","to":"active"},{"at":1795248567,"by":"worker-a","from":"active","note":"report.v0202-7","to":"ready"},{"at":1795248591,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: run 44881868646 success; GitHub Release v0.20.2 has 14 assets; crates.io and PyPI 0.20.2; installed ~/.local/bin/mnemo (00:08) SHA-256 94751b68... equals SHA256SUMS' aarch64-apple-darwin; origin/release-0.20.2 deleted; site shows v0.20.2 and 39 tagged releases. Pending the user: mcp-publisher publish (registry shows 0.20.1) and /mcp in all three sessions.","to":"done"},{"at":1795248700,"by":"planner-a","from":"done","note":"planner-a: the user published to the MCP registry (0.20.2, checked) and reconnected /mcp in planner-a (server 53992, 00:11:02) and reviewer-b (54239, 00:11:22); worker-a's server 49457 is still the 23:43 RC.","to":"done"}]}`
 
 ```text
 v0.20.2: the release
 
 First step: recall. Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. As v0201-5 and RELEASING.md: docs/brain.md exported by the installed release candidate and committed by path; fast-forward main, the annotated tag v0.20.2, the release run (mobile false); WAITING: v0202-7 at the approval stop. After it: crates.io, PyPI, the GitHub Release with the MCP bundle and server.json, the site; install the released binary and report version and SHA-256; delete release-0.20.2. The MCP registry publish stays the user's.
+```
+
+## 01M7YJ1B8637QMJ85KERP90PBR
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T08:02:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-7"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-8h","_mnemo.status":"done","_mnemo.status_history":[{"at":1795248602,"by":"worker-a","from":"queued","to":"active"},{"at":1795248685,"by":"worker-a","from":"active","note":"report.v0202-8h","to":"ready"},{"at":1795248700,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: c080378 on origin/main (PR #168), docs/ideas.md only, my text. Pages serves main, so the ideas page is live.","to":"done"}]}`
+
+```text
+after v0.20.2: commit the Planner's docs/ideas.md hand-off (REV-016)
+
+First step: recall. Report: report.v0202-8h; then post DONE: v0202-8h as a brain post. Planner hand-off after the v0.20.2 release: commit exactly docs/ideas.md (the new section 'One brain for many projects, and namespaces', REV-016.1, decision.brain-boundaries) as its own commit, message 'docs(ideas): one brain for many projects, and namespaces (REV-016)', in a docs PR into main (or the next release branch if one is cut first). Cite the hash.
+```
+
+## 01M7YJW9SG4K2113CTHP303QKH
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T08:17:02Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-8h"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-1","_mnemo.status":"done","_mnemo.status_history":[{"at":1795249047,"by":"worker-a","from":"queued","to":"active"},{"at":1795262191,"by":"worker-a","from":"active","note":"report.v0210-1","to":"ready"},{"at":1795262232,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a 2026-11-21: PR 169 MERGED into release-0.21.0 as 7f822d4, 21/21 checks SUCCESS; origin/release-0.21.0 head is 7f822d4. Code read: records.rs next_hlc (max of now, handle's last + 1, record's own + 1); crud.rs delete writes put_tombstone, refuses deleting a tombstone; tests/merge_groundwork.rs present. Planner rulings on the report's open points: (1) len/stats/verify keep counting tombstones, like messages and tasks; about and export --git leave them out, as specced. (2) Keep the sentinel vector entry (about 1.1 KB per tombstone); no change to what a vector slot means in this release. (3) Mass delete not shrinking until compact: accepted, documented in CHANGELOG. (4) The retention fix in flush.rs: accepted. Tombstones grow without bound (compaction keeps them, and message prunes write them): logged as an open item for a tombstone horizon after merge, not for v0.21.0.","to":"done"}]}`
+
+```text
+v0.21.0: merge groundwork, the HLC and durable tombstones
+
+First step: recall. Spec: spec.v0210 (mnemo get --key spec.v0210). Report: report.<slug>; then post the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. Before anything: restart your background mnemo wait on the released ~/.local/bin/mnemo 0.20.2 (yours runs the scratchpad RC copy). Create release-0.21.0 from main at c080378 inside a tree:checkout claim. Then spec.v0210 STEP 1: the hybrid logical clock (_mnemo.hlc on every write and update) and durable tombstones for delete and forget.
+```
+
+## 01M7ZDXP745TBZTWF6XDAPFY7C
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:09:39Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-1"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["spec.v0210","RB-019.1","RB-019.2","RB-019.7","RB-019.8"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-1b","_mnemo.status":"done","_mnemo.status_history":[{"at":1795277398,"by":"worker-a","from":"queued","to":"active"},{"at":1795277424,"by":"worker-a","from":"active","to":"active"},{"at":1795284425,"by":"worker-a","from":"active","to":"active"},{"at":1795285431,"by":"worker-a","from":"active","note":"report.v0210-1b","to":"ready"},{"at":1795285456,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a 2026-11-21: PR 170 MERGED into release-0.21.0 as a023a62, 21/21 checks SUCCESS; origin/release-0.21.0 head a023a62. Code read: crud.rs writes _mnemo.tombstone_thread/turn (MNEMO_META_TOMBSTONE_THREAD, memory.rs:367); coordination.rs legacy scan takes episodic or working rows (:250-266). Rulings: deviations (1) kind_counts &mut self, (2) a frozen clock beside the offset, (3) the clock notice only for stamps a handle saw: accepted. Note (i), a message pruned sooner than the 30-day keep time can come back in a merge: accepted (messages are pointers; documented). (ii) hlc_since conservative: accepted. (iii) the RC install's first write adds hlc_since to the project brain's manifest: expected.","to":"done"}]}`
+
+```text
+v0.21.0: step 1b, marker fields, the legacy scan, the clock hook
+
+First step: recall. Spec: spec.v0210 rev 2 (mnemo get --key spec.v0210), STEP 1b (a) to (f), and the findings it names (mnemo finding list). Report: report.v0210-1b; then post the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: v0210-1b'.
+```
+
+## 01M7YJW9VAAQ10Y91941JH5F1E
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T08:17:02Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-1b"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.refs":["spec.v0210","RB-019.2","RB-019.3","RB-019.4","RB-019.5","RB-019.6","RB-019.8"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-2","_mnemo.status":"done","_mnemo.status_history":[{"at":1795276407,"by":"planner-a","from":"queued","note":"planner-a 2026-11-21: held until RB-019 (the user's spec check, 'Yes') is triaged; the READ pointer follows.","to":"queued"},{"at":1795285473,"by":"worker-a","from":"queued","to":"active"},{"at":1795285485,"by":"worker-a","from":"active","to":"queued"},{"at":1795285497,"by":"worker-a","from":"queued","to":"active"},{"at":1795285497,"by":"worker-a","from":"active","to":"queued"},{"at":1795289449,"by":"worker-a","from":"queued","to":"active"},{"at":1795290805,"by":"worker-a","from":"active","to":"active"},{"at":1795292020,"by":"worker-a","from":"active","note":"report.v0210-2","to":"blocked"},{"at":1795292047,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-21: BLOCKED answered: option A, with one rule added (equal stamps and different content are never ancestry); see decision.v0210-ancestry. Checked: origin/v0210-2 at f4a86cc (merge.rs merge_core takes now_ms). The history_in change (stop at a missing id) is accepted. Carry on with the ancestry rule and the remaining cases.","to":"blocked"},{"at":1795292095,"by":"worker-a","from":"blocked","to":"active"},{"at":1795306338,"by":"worker-a","from":"active","note":"report.v0210-2","to":"blocked"},{"at":1795306383,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-21: BLOCKED answered by decision.v0210-conflict-flags (option A). Verified: origin/v0210-2 head d3c1c86 (wip), regression seed 083bdc4a committed in tests/proptest_merge.proptest-regressions, the status-and-text flag condition at merge.rs:381 (essence) and :429 (tasks, findings) as reported. Fixes (1)-(3) and the deviations accepted; (4) the Worker's call under A.","to":"blocked"},{"at":1795306403,"by":"worker-a","from":"blocked","to":"active"},{"at":1795367448,"by":"planner-a","from":"active","note":"planner-a 2026-11-22: the user restarted tmux at 09:07-09:10 (Developer Tools for Terminal, for the stalled test binary). Both suite runs were stopped. Checked: HEAD 0cbc7ee plus an uncommitted merge.rs change (19 lines, per-input deletes) on disk; three sessions up, each with an installed 0.20.2 MCP server. Carry on from report.v0210-2: rerun the suite, fix prop_a_copy_of_a_copy.","to":"active"},{"at":1795367458,"by":"planner-a","from":"active","note":"planner-a 2026-11-22 09:11: READ: v0210-2 posted (01M823TBQT20WJ2MAPBHB5GN44) and sent by SendMessage at once: worker-a had no mnemo wait running after the restart (G11).","to":"active"},{"at":1795389403,"by":"worker-a","from":"active","note":"report.v0210-2","to":"blocked"},{"at":1795389422,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-22: VERIFIED report.v0210-2 round 3: WIP 8524c3f on origin/v0210-2 (6 files, +592/-42), seed 91d13c7 saved in proptest_merge.proptest-regressions; tree clean apart from planner files. Third BLOCKED on this step, so the hop cap (rule 5) applies: NEEDS-USER for the chain rule (options A/B/C in the report) and a fourth round. Planner recommends A.","to":"blocked"},{"at":1795389605,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-22: the user chose option A and approved a fourth round, asking to borrow from Git: decision.v0210-chain-rule. Carry on from 8524c3f. READ: v0210-2 posted (01M82RYCXNQ0E8CAQV74NTK4D6).","to":"blocked"},{"at":1795389616,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-22: READ: v0210-2 also sent by SendMessage at once: worker-a still had no mnemo wait running (G11, again).","to":"blocked"},{"at":1795392693,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-22: round 4 also covers REV-017.1 (A) and (B) as triaged (key conflict flags from the write-made links, so (a+b)+c and a+(b+c) flag alike; a first-written stamp that survives the 8-stamp cut). REV-017.1 (C) and REV-017.2 are in v0210-3b.","to":"blocked"},{"at":1795392886,"by":"planner-a","from":"blocked","note":"planner-a 2026-11-22, refining my REV-017.1 note after checking the fields: no existing field holds a record's first clock stamp (created_at and the ULID time are wall clock, and the property tests skew clocks by an hour; _mnemo.hlc_since is per file). So (B) takes one reserved key that put sets once when a record is first written and nothing changes after; older-build records fall back to today's min over _mnemo.hlc and hlc_prev. This is a fact of the write, not something a merge derives, so it fits REV-017.3 (1)'s rule against adding more merge bookkeeping. For (A): compute the maximal live versions after the id-level deletes are applied, so the set doesn't depend on the merge order.","to":"blocked"},{"at":1795421528,"by":"worker-a","from":"blocked","note":"round 4 (decision.v0210-chain-rule)","to":"active"},{"at":1795421528,"by":"worker-a","from":"active","note":"report.v0210-2","to":"ready"},{"at":1795421557,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED. PR #176 MERGED 08:11Z into release-0.21.0 as 5a62405 (head 72587ec), 27 of 27 checks SUCCESS (gh pr checks); origin/release-0.21.0 tip is 5a62405; 3e17b88..72587ec is the one-line Windows file-name fix in tests/merge.rs; _mnemo.first_hlc, _mnemo.merge_linked and _mnemo.tombstone_supersedes are in memory.rs. Deviations accepted: (1) the three surviving mutations stand: each is a defensive path no write in this build reaches (the hlc_prev fold for records without first_hlc, keep_flag on a covered fact, put stripping merge_linked from a new record); a one-line comment saying so at each is welcome in a later commit, not required. (2) the three reserved keys: first_hlc is set at write time, merge_linked and tombstone_supersedes are the links option A asked for; no further merge keys in v0.21.0 (REV-017.3 (1)). (3) the two bugs fixed with tests, (4) and (5) accepted. REV-017.1 (A) and (B) done here; (C) is in v0210-3b.","to":"done"}]}`
+
+```text
+v0.21.0: Mnemo::merge, the rules and their proptests
+
+First step: recall. Spec: spec.v0210 rev 2 (mnemo get --key spec.v0210), STEP 2 in full (identity and output, rules (0) to (4), tests), and the findings it names. The user's choices are in decision.v0210-merge-rules. Report: report.v0210-2; then post the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: v0210-2'.
+```
+
+## 01M7YJW9XJJYNMVFB5868S02S5
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T08:17:02Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-3","_mnemo.status":"done","_mnemo.status_history":[{"at":1795421557,"by":"planner-a","from":"queued","note":"planner-a 2026-11-23: first commit the two hand-offs, each its own commit, so the tree holds no planner edits: handoff-inspect-mockup (docs/design/inspect-refresh/) and handoff-readme-lead (README.md, index.html). Cite their hashes in report.v0210-3. Then this task.","to":"queued"},{"at":1795421633,"by":"worker-a","from":"queued","to":"active"},{"at":1795431061,"by":"worker-a","from":"active","note":"report.v0210-3","to":"ready"},{"at":1795431086,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED. PR #177 MERGED into release-0.21.0 as 2ed02e3 (head 5ef98a6); 22 checks SUCCESS, 1 SKIPPED (deploy, Pages, skipped on PRs), python bindings (linux) SUCCESS; 18 files as reported; the AGENTS.md change is one task-table row (technical section, allowed); about counts through Mnemo::merge_conflicts. Hand-offs 9dfd95b and 43969c9 verified and done. Deviations (1)-(4) accepted. (5) the macOS test_index_and_snapshots failure reproduces on the base wheel, so it isn't from this PR; logged in status.dogfood-gaps as G15 for after the release.","to":"done"}]}`
+
+```text
+v0.21.0: mnemo merge in the CLI, about, inspect, guide and Python
+
+First step: recall. Spec: spec.v0210 (mnemo get --key spec.v0210). Report: report.<slug>; then post the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. spec.v0210 STEP 3: mnemo merge a b -o out, conflicts in about and inspect, the guide, README, the Python binding, AGENTS.md's task-table row.
+```
+
+## 01M82VWS7P8ZZRS2GP6KG8HJ2N
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T00:11:33Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-3"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["REV-017.1","REV-017.2"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-3b","_mnemo.status":"done","_mnemo.status_history":[{"at":1795392886,"by":"planner-a","from":"queued","note":"planner-a 2026-11-22: for (4), std has no rename that refuses to overwrite and the crate forbids unsafe; File::create_new on the output path then copy and fsync (removing it on error) is acceptable as the fallback. Say in the report if you find a better way. For (2), hashing only changed records must leave the merged names identical in every order; the proptests decide.","to":"queued"},{"at":1795431122,"by":"worker-a","from":"queued","to":"active"},{"at":1795440016,"by":"worker-a","from":"active","note":"report.v0210-3b","to":"ready"},{"at":1795440035,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED. PR #178 MERGED into release-0.21.0 as 5b0a1d6 (head ae229b9), 27 of 27 checks SUCCESS; 7 files as reported; merge_bench.rs excluded from the crate package. Measured by the Worker on this Mac: 100,000 records 8.7-9.2s and 2.18 GB peak before, 2.0s and 0.99 GB after; 10,000 records 0.65s/233 MB before, 0.26s/114 MB after; merged exports byte-identical before and after. Deviations (a)-(d) accepted. (b) the two other examples that use dev-hooks functions and are still packaged: fix with the release PR (v0210-6) if cargo package or publish --dry-run fails on them, else carry. (d) streaming the inputs (still ~985 MB at 100K) is not for v0.21.0 unless v0210-4 shows a need. REV-017.1 (C) and REV-017.2 (1)-(3) done; verify against the v0.21.0 tag at release.","to":"done"}]}`
+
+```text
+v0.21.0: merge memory and speed before the dogfood, and output on filesystems without hard links
+
+First step: recall. Findings REV-017.1 (C) and REV-017.2 (1)-(3), as triaged. (1) Move records by value through inputs, kept, sides and out where a lookup doesn't need the whole record. (2) wins() compares numbers first and only then hashes; name_final_versions hashes only records the merge changed. (3) kept_keys indexed by (owner, key), O(N+T); gone_after from an index, not a scan. (4) merge_files: when hard_link fails as unsupported or not permitted (exFAT, FAT32, some FUSE mounts), place the output without overwriting a file that appeared meanwhile; a test through a hook. Keep every merge test, proptest and saved seed passing; give before and after numbers from a run. Report: report.v0210-3b; post DONE or BLOCKED to planner-a.
+```
+
+## 01M7YJW9ZZWCXXJSSB814MSY7S
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T08:17:02Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-3"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-4","_mnemo.status":"done","_mnemo.status_history":[{"at":1795392693,"by":"planner-a","from":"queued","note":"planner-a 2026-11-22: v0210-3b (REV-017.2 speed and memory) comes before this dogfood benchmark.","to":"queued"},{"at":1795431086,"by":"planner-a","from":"queued","note":"planner-a 2026-11-23: also time 'mnemo about' on a copy of the brain with the 0.20.2 install and with the branch build (about now scans every live non-turn record for merge flags, v0210-3 deviation (3)); report both. v0210-3b runs before this task.","to":"queued"},{"at":1795431110,"by":"worker-a","from":"queued","to":"active"},{"at":1795431122,"by":"worker-a","from":"active","note":"worker-a 2026-11-23: task next handed this out first (oldest by order); put back to queued untouched, since its note and READ: v0210-3b say v0210-3b runs first.","to":"queued"},{"at":1795440044,"by":"worker-a","from":"queued","to":"active"},{"at":1795440400,"by":"worker-a","from":"active","note":"report.v0210-4","to":"ready"},{"at":1795440416,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED by the report's evidence (no code changed, nothing to check in git): copies of the brain rekeyed to throwaway passphrases with no key-store write; merge 0.81-0.83s, 375 MB peak, 35,077 records, 3 conflicts each as the rules say; about, essence, history and recall on the output; about timing 0.16s both builds; 100K pair 2.0-2.6s, ~985 MB, export identical; copies deleted; the live brain only copied. git status shows no stray files. The task-status finding is decision.v0210-task-status; it and the about tie-break are v0210-4b, before READY. Streaming the inputs is not needed for v0.21.0.","to":"done"}]}`
+
+```text
+v0.21.0: dogfood merge on copies of the project brain
+
+First step: recall. Spec: spec.v0210 (mnemo get --key spec.v0210). Report: report.<slug>; then post the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. spec.v0210 STEP 4: dogfood merge on two copies of the project brain (never the live file), with counts, conflicts, time and size; delete the copies after.
+```
+
+## 01M849D5PMW1HZ1Q5J28YA8QPN
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T13:26:56Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-4b","_mnemo.status":"done","_mnemo.status_history":[{"at":1795440428,"by":"worker-a","from":"queued","to":"active"},{"at":1795449685,"by":"worker-a","from":"active","note":"report.v0210-4b","to":"ready"},{"at":1795449710,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED. PR #179 MERGED into release-0.21.0 as 95db7ff (head ab81772), 21 of 21 checks SUCCESS; run 45205853467 succeeded on attempt 2 (the Windows rerun). Deviations (a)-(e) accepted; (a) is the right call given second-resolution history. (d) is a gap: the 25 saved seeds now replay different cases, so they no longer guard the cases they were saved for: v0210-4c. The pre-existing invalid_at straddle (keyed.rs now_secs() at ~234 and ~373 after Memory::new; merge.rs keeping an input's own invalid_at) is confirmed in the code: v0210-4c.","to":"done"}]}`
+
+```text
+v0.21.0: task status in a merge, and a stable about order (dogfood findings)
+
+First step: recall. From report.v0210-4. (1) decision.v0210-task-status: the merged status comes from the last history entry that changed it; a note-only entry never sets it; concurrent different moves: the later wins and the task is flagged. A test for the dogfood case (move on one copy, note on the other a second later) both ways round, and a 2,048-case proptest pass with every saved seed. (2) about_in (store/recall.rs): break ties after created_at by id, so equal-importance onboarding entries keep one order; a test. CHANGELOG. Report: report.v0210-4b; post DONE or BLOCKED to planner-a.
+```
+
+## 01M84J8T3SPAVCWE70MZ20B6DJ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T16:01:50Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-4b"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-4c","_mnemo.status":"done","_mnemo.status_history":[{"at":1795449723,"by":"worker-a","from":"queued","to":"active"},{"at":1795456649,"by":"worker-a","from":"active","note":"local checks done (suite 939/0/2, clippy x2, proptest 2048); committing","to":"active"},{"at":1795458799,"by":"worker-a","from":"active","note":"report.v0210-4c","to":"ready"},{"at":1795458834,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED. PR #180 MERGED into release-0.21.0 as 8b52e90 (head f8210e7), 21 of 21 checks SUCCESS (one Windows rerun for the known pager flake, fact.flake-pager-streamed-windows). invalid_at from the next version's created_at in both keyed paths and in the merge, with a four-grouping test that fails on the old code; all 25 saved cases replayed as deterministic tests, mapped 25 of 25. No deviations.","to":"done"}]}`
+
+```text
+v0.21.0: one invalid_at in every merge order, and the saved proptest cases kept as tests
+
+First step: recall. From report.v0210-4b. (1) The merged _mnemo.invalid_at of a superseded keyed version is a function of the chain alone: the merge always writes the next version's created_at (so files from 0.20.2, whose invalid_at can be a second off, merge alike in any order), and the keyed write (keyed.rs, both supersede paths) stamps the old version's invalid_at from the new version's created_at instead of a second now_secs() read. A test that forces the straddle (a dev-hooks clock or a hand-built input) and checks merge(a, merge(b, d)) == merge(merge(a, b), d). (2) The saved seeds in proptest_merge.proptest-regressions no longer replay their cases since the strategy changed (v0210-4b deviation (d)). For each saved line, turn its shrunk inputs (the comment) into a deterministic test that calls the property's check directly, or show it is already covered by a named test; list the mapping in the report. Then a 2,048-case pass. CHANGELOG if user-visible. Report: report.v0210-4c; post DONE or BLOCKED to planner-a. After this: v0210-5 READY.
+```
+
+## 01M7YJWA23XKQ58TZJFP46J0CN
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T08:17:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-5","_mnemo.status":"done","_mnemo.status_history":[{"at":1795440428,"by":"worker-a","from":"queued","to":"active"},{"at":1795440428,"by":"worker-a","from":"active","note":"worker-a 2026-11-23: task next handed this out first (oldest by order); put back to queued untouched, since READ: v0210-4b names 4b and 5 runs after it.","to":"queued"},{"at":1795449720,"by":"worker-a","from":"queued","to":"active"},{"at":1795449725,"by":"worker-a","from":"active","note":"task next handed this out before v0210-4c (the READ named v0210-4c); requeued untouched","to":"queued"},{"at":1795458834,"by":"planner-a","from":"queued","note":"planner-a 2026-11-23: go. The reviews start now, in parallel with this task, on the merge code at 8b52e90 (decision.v0210-reviews): REVIEWER-B as rb-020 (batch RB-020; the body's 'rb-019' is stale) and REVIEWER-A as rev-019 (product). Merge code changes after 8b52e90 only through their triaged findings. While REVIEWER-B is building, keep to the version bump and the dry run; no benchmarks.","to":"queued"},{"at":1795458849,"by":"worker-a","from":"queued","to":"active"},{"at":1795460824,"by":"worker-a","from":"active","note":"PR #181 merged as 23f9452; dry run 45245451671 running","to":"active"},{"at":1795463017,"by":"worker-a","from":"active","note":"dry run 45245451671 attempt 1: 24 ok, 9 skipped, 1 cancelled (macOS arm64 runner never acquired); rerun of failed job running","to":"active"},{"at":1795463516,"by":"worker-a","from":"active","note":"report.v0210-5","to":"ready"},{"at":1795463543,"by":"planner-a","from":"ready","note":"planner-a 2026-11-23: VERIFIED. PR #181 MERGED as 23f9452 on release-0.21.0; mnemo/Cargo.toml and server.json at 0.21.0 (bundle URL v0.21.0); format.rs unchanged since v0.20.2; dry run 45245451671 at 23f9452 concluded success on attempt 2 (25 success, 9 skipped; attempt 1's macOS arm64 job never got a runner). Mobile stays 0.20.0, accepted. Agreed: the dry run is repeated after v0210-5f and 5g, before the RC. The version text (v0210-5h) waits for 5f and 5g, since the 'What's new' section names what they add (mnemo forget, settling conflicts).","to":"done"}]}`
+
+```text
+v0.21.0: READY
+
+First step: recall. Spec: spec.v0210 (mnemo get --key spec.v0210). Report: report.<slug>; then post the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. As v0202-5: READY for v0.21.0: versions 0.21.0 in the manifests, lockfiles, server.json and integrations/mcpb, CHANGELOG, the dry run (mobile as the diff requires). Ask in the report for the Planner's version text. Then REVIEWER-B reviews (rb-019) before the tag.
+```
+
+## 01M84X287XCS8G9219JWKJA6N7
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:10:30Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["RB-020.1","RB-020.2","RB-020.3","RB-020.4","RB-020.5","RB-020.6"],"_mnemo.role":"worker","_mnemo.slug":"v0210-5f","_mnemo.status":"done","_mnemo.status_history":[{"at":1795463563,"by":"worker-a","from":"queued","to":"active"},{"at":1795466740,"by":"worker-a","from":"active","note":"in progress: all six findings coded, tests added; proptests found three more laws on outputs and older writes, fixed; running checks","to":"active"},{"at":1795470463,"by":"worker-a","from":"active","note":"fixes and tests in the tree; proptest 2048 passed; running the suite, clippy, the mutation run, then the dogfood","to":"active"},{"at":1795475032,"by":"worker-a","from":"active","note":"suite, clippy both ways, fmt clean; dogfood done; mutation run going (about 4 min a mutation)","to":"active"},{"at":1795481898,"by":"worker-a","from":"active","note":"mutation run finished; reading results, then commit and PR","to":"active"},{"at":1795482326,"by":"worker-a","from":"active","note":"mutation run: 69 of 76 killed; 2 survivors killed by new tests; 4 rerunning at 2,048 cases","to":"active"},{"at":1795486367,"by":"worker-a","from":"active","note":"report.v0210-5f","to":"blocked"},{"at":1795486423,"by":"planner-a","from":"blocked","note":"Planner: decided in decision.v0210-5f-older-builds: (1) ULID millisecond for unstamped versions, property limited only for the clock-ahead case, documented; (2) keep fixing, time-boxed to this round. Still fix round 1.","to":"blocked"},{"at":1795486441,"by":"worker-a","from":"blocked","note":"resuming under decision.v0210-5f-older-builds","to":"active"},{"at":1795487557,"by":"worker-a","from":"active","note":"decision applied: id-millisecond order, naming fix for in-place older marks, clock-ahead limit documented; 2,048-case proptest and mutation reruns going","to":"active"},{"at":1795489873,"by":"worker-a","from":"active","note":"one more 2,048-case failure fixed (an edited conflict copy made again); rerunning 2,048 cases","to":"active"},{"at":1795490914,"by":"worker-a","from":"active","note":"2,048 found a fourth naming case (112dca); fixed by never naming a merged version after an older build's in-place-marked copy; chasing one intermittent saved case","to":"active"},{"at":1795491086,"by":"worker-a","from":"active","note":"intermittent invalid_at flake traced to Memory::new reading the clock twice; fixed; looping saved cases","to":"active"},{"at":1795492172,"by":"worker-a","from":"active","note":"saved cases clean over 150 runs; 2,048-case proptest and the mutation reruns going","to":"active"},{"at":1795493281,"by":"worker-a","from":"active","note":"proptest 2,048 passed (8 passed); full check and mutation reruns going","to":"active"},{"at":1795496697,"by":"worker-a","from":"active","note":"PR #182 (8bde5dd) open, CI running","to":"active"},{"at":1795497950,"by":"worker-a","from":"active","note":"report.v0210-5f","to":"ready"},{"at":1795497978,"by":"planner-a","from":"ready","note":"VERIFIED 2026-11-24: PR #182 MERGED into release-0.21.0 as 0c53ec5 (24 files); checks 22 pass, 1 skipped (deploy). In code at 0c53ec5: key_of falls back to the id's millisecond (n>>80, merge.rs:1494) per decision.v0210-5f-older-builds; Memory::new takes created_at and the id from one clock read (memory.rs:104); 36 saved seeds in proptest_merge.proptest-regressions. Tree clean apart from my sync.md hand-off. Accepted deviations: the clock-ahead limit (documented); merge(x,x) names in-place-marked older versions once and adds tombstones for deleted rows (laws stated modulo those); the 'covered fact keeps its flag' survivor is equivalent, with the reasoning in the report. Carried to v0210-5g (decision.merge-no-rush): the four mutations surviving at 2,048 cases.","to":"done"}]}`
+
+```text
+v0.21.0: RB-020 fixes (older records, markerless deletes, settled conflicts, proptest ops)
+
+First step: recall. The user's go (2026-11-23): fix RB-020 now; REV-019's findings, when they come, are a second small round. Do each finding as its triage says (mnemo finding get RB-020.n): .1 (holds the tag) slot order from write-made links first, created_at-ms fallback, put gives an older record first_hlc on an in-place rewrite, fixtures from the published v0.20.2 with keyed records; .2 (holds the tag) a deterministic tombstone for every markerless deleted row, the CLI note reworded, report the count on a copy of our brain; .3 the kept-copy rule, the report line, the guide's how-to-settle; .4 ops 1-3 and a few merge_files-and-reopen cases; .5 put records an unstamped version's pair in hlc_prev; .6 items 1-6. Acceptance: proptest_merge at 2,048 cases with every saved case, the full suite, clippy with and without failpoints, fmt, the mutation run (say how many and which survive), CI green. Then re-run v0210-4's dogfood merge on two fresh copies of the brain, with one key rewritten on each copy by this build first (RB-020.1's path), and report it. This is fix round 1 of 3 for READY. Report: report.v0210-5f; post DONE or BLOCKED to planner-a.
+```
+
+## 01M84Z5F979A3TA2T87ERT1EF9
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:47:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-5f"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["REV-019.1","REV-019.2"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-5g","_mnemo.status":"done","_mnemo.status_history":[{"at":1795497978,"by":"planner-a","from":"queued","note":"Planner, added after v0210-5f (decision.merge-no-rush): REV-019.1's first part (a new write of an essence item, task or finding clears its flag) is already in, from 5f. Also in this round: the four mutations that survived at 2,048 cases in report.v0210-5f ('put keeps the mark on a new record', 'a key version's copies always concurrent', 'unstamped copies compared by what was written', 'covered flag from the winner alone'). For each, either a test that kills it, or remove the code if it's redundant (with the laws still passing at 2,048), or a short proof of equivalence in the report, like the one for 'covered fact keeps its flag'.","to":"queued"},{"at":1795497994,"by":"worker-a","from":"queued","to":"active"},{"at":1795499684,"by":"worker-a","from":"active","note":"in progress: settling on write (facts, copies, key versions with _mnemo.merge_settled), mnemo forget, verify --recover, table ids, wording, guide; testing removal of the marks-only rule at 2,048","to":"active"},{"at":1795501447,"by":"worker-a","from":"active","note":"marks-only rule removed (2,048 cases pass without it); 13-mutation run and full check going","to":"active"},{"at":1795503274,"by":"worker-a","from":"active","note":"mutations: 11 of 13 killed (settled-flag one by a new test); full suite running","to":"active"},{"at":1795504030,"by":"worker-a","from":"active","note":"PR #183 (6c504ab) open, CI running","to":"active"},{"at":1795505226,"by":"worker-a","from":"active","note":"CI ubuntu failed saved case ed02c2: the invalid_at second flake 5f's Memory::new fix missed (remember_keyed took a new id in put); fixed, full check rerunning","to":"active"},{"at":1795509717,"by":"worker-a","from":"active","note":"PR #183 merged as d29d4b8; final 2,048-case proptest on the merged code running before the report","to":"active"},{"at":1795510621,"by":"worker-a","from":"active","note":"report.v0210-5g","to":"ready"},{"at":1795510649,"by":"planner-a","from":"ready","note":"VERIFIED 2026-11-24: PR #183 MERGED into release-0.21.0 as d29d4b8 (17 files); checks 22 pass, 1 skipped (deploy), after a re-run of an unrelated ETXTBSY failure in two onboard_cli tests (a Linux stub-executable race: carried as a flake, change only if it recurs). In code at d29d4b8: only_marks_differ gone; keyed.rs fresh_id (a keyed write keeps its id, so created_at and the id share one second); SETTLE_REACH 64; MNEMO_META_MERGE_SETTLED; Command::Forget; MERGE_TABLE_IDS 10; verify --recover named in merge.rs's refusal. Accepted: verify --recover as the safe hint REV-019.2 asked for; the two survivors with their reasons ('put keeps the mark' equivalent by check_caller_reserved; 'covered flag from the winner alone' differs only past HLC_PREV_KEEP, the documented limit). Fix round 2 of 3 used; no further round planned. Next: handoff-sync-md, then v0210-5h.","to":"done"}]}`
+
+```text
+v0.21.0: REV-019 fixes (settling conflicts, mnemo forget, wording)
+
+First step: recall. Fix round 2 of 3 for READY (decision.v0210-reviews-round). Do REV-019.1's and REV-019.2's v0.21.0 parts as triaged (mnemo finding get REV-019.n): a user's write clears _mnemo.merge_conflict on that record at once; a new write of a key settles its flagged earlier versions (your choice how, with a test); mnemo forget <id> in the CLI (README table, guide); the merge table lists up to 10 conflicted ids or keys; the guide's after-a-merge paragraph; the five wording fixes. If v0210-5f's PR isn't open yet, you may do both in one PR, reporting each task separately. Keep the merge laws: the proptests at 2,048 cases, including ops that write on an output, decide. Report: report.v0210-5g; post DONE or BLOCKED to planner-a.
+```
+
+## 01M86CDVSHXW2C304TP1D7W5EZ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-24T08:58:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["handoff-sync-md"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-5h","_mnemo.status":"done","_mnemo.status_history":[{"at":1795510783,"by":"worker-a","from":"queued","to":"active"},{"at":1795510961,"by":"worker-a","from":"active","note":"commit 3a36575 (PR #185) merged; dry run 45361374327 on release-0.21.0 running","to":"active"},{"at":1795511700,"by":"worker-a","from":"active","note":"report.v0210-5h","to":"ready"},{"at":1795511728,"by":"planner-a","from":"ready","note":"VERIFIED 2026-11-24: PR #185 squash-merged as 3a36575 on release-0.21.0 (README.md, index.html). Repeat dry run 45361374327 at 3a36575: success, 25 jobs succeeded, 9 skipped. Worker-a's three wording catches are right; fixed in v0210-5i.","to":"done"}]}`
+
+```text
+v0.21.0: commit the Planner's version text (README.md, index.html)
+
+First step: recall. Planner-owned files, edited by planner-a for v0.21.0. Commit exactly README.md and index.html as their own commit on release-0.21.0 (through a PR like the other hand-offs, never mixed with code), with the message: 'docs: v0.21.0 in the README and the landing page (v0210-5h)'. What changed: README 'What's new in v0.21.0' above v0.20.2's, the example string to v0.21.0; index.html the pill, 40 tagged releases, 'These examples use v0.21.0', the example string, and merge moved from Next to Shipped (v0.13 – v0.21). Check the README's claims against the shipped code (mnemo forget <id> in the CLI, the report's first ten, v0.20.2 opens a merged file) and say in the report if any is wrong rather than editing. Cite the hash in report.v0210-5h and post DONE to planner-a. Then the repeat dry run on release-0.21.0 (agreed at v0210-5) before v0210-6.
+```
+
+## 01M86DDEADRWT7FM81P64Z46WH
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-24T09:15:28Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-5i","_mnemo.status":"done","_mnemo.status_history":[{"at":1795511736,"by":"worker-a","from":"queued","to":"active"},{"at":1795511803,"by":"worker-a","from":"active","note":"report.v0210-5i","to":"ready"},{"at":1795511824,"by":"planner-a","from":"ready","note":"VERIFIED 2026-11-24: PR #186 squash-merged as 724f630 on release-0.21.0, README.md only. The rename exception (a task or finding renamed <name>-merge-2 keeps its flag while the rename stands) is in the CHANGELOG (line 119) but not in the guide's after-a-merge paragraph; not release-blocking for README highlights. Carried to v0.21.1: one guide sentence for it (the Worker's file).","to":"done"}]}`
+
+```text
+v0.21.0: commit the Planner's README wording fix
+
+First step: recall. Planner-owned README.md, edited by planner-a after report.v0210-5h's three catches: (1) a key's other version stays in its history, a fact's other edit is a separate flagged copy; (2) a write settles a key, essence item, task or finding at once, a fact's copy is forgotten; (3) random tests use writes made the way older builds make them, fixed tests the published v0.20.2's files. Commit exactly README.md as its own commit on release-0.21.0 (through a PR like v0210-5h), message: 'docs: the v0.21.0 notes say what settles each conflict (v0210-5i)'. Check the three bullets against the code and the guide again and report anything still wrong rather than editing. No new dry run needed (README only, outside the release build). Cite the hash in report.v0210-5i and post DONE to planner-a. Then v0210-6.
+```
+
+## 01M86DDWM8Q2VY1DKDY2YM0VCW
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-24T09:15:43Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-5i"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.first_hlc":1795511743112,"_mnemo.hlc":1795534929954,"_mnemo.hlc_prev":[[1795534906028,297280292964743666],[1795534905180,1040611382745061691],[1795534905104,912144997822352552],[1795534585130,3855786075636658145],[1795534525215,211408478461096482],[1795511743000,2589138704549087093]],"_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-6","_mnemo.status":"done","_mnemo.status_history":[{"at":1795511835,"by":"worker-a","from":"queued","to":"active"},{"at":1795534525,"by":"worker-a","from":"active","note":"report.v0210-6","to":"blocked"},{"at":1795534585,"by":"planner-a","from":"blocked","note":"planner-a: the user approved the keychain prompt and reconnected /mcp in all sessions (2026-11-24). VERIFIED: ~/.local/bin/mnemo is 0.21.0, SHA-256 649a47c1... (equals report.v0210-6), installed 01:20 PST; the three MCP servers restarted after it: 91583 planner-a (07:35:52), 91609 reviewer-b (07:35:59), 91668 worker-a (07:36:07). Dogfood: I read report.v0210-6 with the RC's get --key.","to":"blocked"},{"at":1795534905,"by":"worker-a","from":"blocked","note":"resumed on READ: v0210-6","to":"active"},{"at":1795534905,"by":"worker-a","from":"active","note":"report.v0210-6","to":"ready"},{"at":1795534929,"by":"planner-a","from":"ready","note":"VERIFIED 2026-11-24: report.v0210-6 read with the RC; RC 0.21.0 (649a47c1...) on all three servers (my note above). Real brain: about and verify clean, no conflicts line. The walkthrough on two rekeyed copies covered merge, the table and JSON, about's flag line, inspect's conflicts, forget (and its refusal the second time), and a re-merge that keeps the settled copy gone. Copies deleted. Wording finding and asides go to v0210-6b before the tag (decision.merge-no-rush): small, CLI text only.","to":"done"}],"_mnemo.ver":2432762730813964473}`
+
+```text
+v0.21.0: install the release candidate for dogfooding
+
+First step: recall. Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. As v0202-6 (decision.dogfood item 4): build release-0.21.0 head with release.yml's features, install to ~/.local/bin/mnemo by one atomic move, report commit, version, mtime and SHA-256, then set blocked with report.v0210-6 and post WAITING: v0210-6 (the user approves the keychain prompt and reconnects /mcp in every session). On READ: v0210-6, with the installed RC on the real brain: about (the merge conflicts line, expected none), verify; then on two fresh copies of the brain (never the brain itself, rekeyed to throwaway passphrases with the installed CLI, no --store) one change in each, mnemo merge, the report, about, mnemo forget <id> on a flagged copy, and mnemo inspect's conflicts on the output; report each output's shape and anything wrong, then delete the copies.
+```
+
+## 01M873HG40JFRKDBQS8WA0JK18
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-24T15:42:10Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-6"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.first_hlc":1795534930048,"_mnemo.hlc":1795538755453,"_mnemo.hlc_prev":[[1795538730349,2473385003353954213],[1795538729216,4165920660036291393],[1795534961477,1209723285868972536],[1795534932793,2366480724582489820],[1795534930048,3063025893061370537]],"_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-6b","_mnemo.status":"done","_mnemo.status_history":[{"at":1795534961,"by":"worker-a","from":"queued","to":"active"},{"at":1795538729,"by":"worker-a","from":"active","note":"report.v0210-6b","to":"ready"},{"at":1795538755,"by":"planner-a","from":"ready","note":"VERIFIED 2026-11-24: PR #187 MERGED into release-0.21.0 as d183a6b; checks 21 pass. CLI text, a CHANGELOG line, the Python doc, project_memory.py and a new merge_cli test; merge.rs and the format untouched. The order slip with v0210-7 is logged as G17 (status.dogfood-gap-g17).","to":"done"}],"_mnemo.ver":269749129662747360}`
+
+```text
+v0.21.0: the merge table's claims line, about's '1 snapshots', and the report helper's keychain timeout
+
+First step: recall. From report.v0210-6, before the tag. (1) The merge table: 'plus <a>'s claims and presence: N (not merged: the output keeps the first copy's, and the counts above leave them out)' is wrong, since 'in both' counts them (store/merge.rs about line 1094). Change the CLI wording only, not MergeReport or merge.rs (the mirrored-report law stays as it is): say the merged count leaves them out, e.g. '(not merged: the output keeps the first copy's; the merged count leaves them out)'. Update any test that pins the line, and the guide or CHANGELOG if either quotes it. (2) about's header: '1 snapshots' to '1 snapshot' (and any other count in that line with the same slip). (3) G16 (status.dogfood-gap-g16), test/scripts/project_memory.py only: tell an info timeout apart from a build without the keychain feature, and say to approve the keychain prompt. No change to merge.rs or the format. Gates: fmt, clippy with and without failpoints, the full suite --features failpoints, the guide test and llms files if the guide changes. No new dry run (release.yml and the manifests are unchanged; CI covers the build) and no new RC install (CLI text only; the release's binary is installed at v0210-7). PR into release-0.21.0; report.v0210-6b; DONE to planner-a. Then v0210-7.
+```
+
+## 01M86DDWQ3865GSZ20ZFCF3D3G
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-24T09:15:43Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0210-6"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.first_hlc":1795511743203,"_mnemo.hlc":1795538847934,"_mnemo.hlc_prev":[[1795538767155,2395095164694632740],[1795534964508,3263477430784830961],[1795534961391,888090668261660589],[1795534950317,2215159085731295416],[1795534940049,2584062649098133924],[1795534932792,3202879279673824158],[1795534930129,2030254977622222751],[1795511743000,557880500251951958]],"_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0210-7","_mnemo.status":"active","_mnemo.status_history":[{"at":1795534930,"by":"planner-a","from":"queued","note":"planner-a: now after v0210-6b (CLI wording), which goes in before the tag.","to":"queued"},{"at":1795534940,"by":"worker-a","from":"queued","to":"active"},{"at":1795534950,"by":"worker-a","from":"active","note":"worker-a: taken by task next in error (its after field still names v0210-6, not v0210-6b, as planner-a's note says); put back, taking v0210-6b first","to":"queued"},{"at":1795534961,"by":"worker-a","from":"queued","to":"active"},{"at":1795534964,"by":"worker-a","from":"active","note":"worker-a: put back again; taken only to reach v0210-6b with task next (task next has no slug, and v0210-7's after field still names v0210-6). v0210-6b is active.","to":"queued"},{"at":1795538767,"by":"worker-a","from":"queued","to":"active"},{"at":1795538847,"by":"worker-a","from":"active","note":"worker-a: started. Pre-tag: CI on d183a6b running; cargo package (verify) running for the dev-hooks examples check; RELEASING.md step 4, the demo GIF, re-recorded (run 45441121102), since the tape's last line is about's header, which v0210-6b changed, and the GIF dates from v0.20.0. Then the backup, the tag.","to":"active"}],"_mnemo.ver":4265884710530896984}`
+
+```text
+v0.21.0: the release
+
+First step: recall. Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. As v0202-7 and RELEASING.md: docs/brain.md exported by the installed release candidate and committed by path; fast-forward main, the annotated tag v0.21.0, the release run (mobile false, as .github/release-mobile says); WAITING: v0210-7 at the approval stop. After it: crates.io, PyPI, the GitHub Release with the MCP bundle and server.json, the site; install the released binary and report version and SHA-256; delete release-0.21.0. If cargo package complains about the dev-hooks examples (perf2_split.rs, shared_bench.rs), stop and report before the tag. The MCP registry publish stays the user's.
+```
+
+## 01M7ZD00Y9EKVMPGNYEMQ7ZYWF
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T15:53:27Z
+- importance: 0.5
+- metadata: ``{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"reviewer-b","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["spec.v0210","v0210-1"],"_mnemo.role":"reviewer","_mnemo.seen_by":["reviewer-b"],"_mnemo.slug":"v0210-spec-review","_mnemo.status":"done","_mnemo.status_history":[{"at":1795276424,"by":"planner-a","from":"queued","note":"planner-a 2026-11-21: brain post 01M7ZD010F0X83EJ54Z7BMFW2N sent, but reviewer-b had no mnemo wait running, so the pointer went by SendMessage too (a miss of the waiter rule, not of the post).","to":"queued"},{"at":1795276426,"by":"reviewer-b","from":"queued","to":"active"},{"at":1795277063,"by":"reviewer-b","from":"active","note":"reviewer-b 2026-11-21, RB-019 done, by reading at 7f822d4 in my own clone; nothing built or run. RECALL: found spec.v0210, report.v0210-1 and decision.v0210-start; no earlier finding on a merge, and none rejected that this touches. VERDICT: the spec should change before the Worker builds step 2. Eight findings, all open. HIGH: RB-019.1 (a delete with no marker comes back: older builds, deletes before v0.21.0, compaction drops; and an older build's compact hides markers from the row scan, which is step 1 code) and RB-019.2 (the keyed-delete rule reads two ways and the marker can't support the by-key reading; a turn saved under two ids, conflict copies and a re-created id; I recommend id-level deletes with no clock, which differs from sync.md section 7, so it's the user's to choose). MEDIUM: RB-019.3 (symmetry and idempotence need rules the spec lacks: a key's chain, conflict copy ids, ties, no wall clock in the merge), RB-019.4 (names that must stay unique, fields updated in place, done and verified as final, turns in parts), RB-019.5 (the clock: a stale stamp after an older build's edit, no rule for a missing stamp, a copy that runs ahead), RB-019.6 (a rekeyed copy is refused for good; the output's key is right if it follows compaction; refusals to add; the result cache), RB-019.8 (three tests that don't prove what they say, a clock hook, cases to add). LOW: RB-019.7 (the two sentences on the marker's cost and a horizon). Two changes touch step 1's code, so they're cheapest now: the marker's fields (RB-019.2) and the legacy scan (RB-019.1). NOT DONE: no build, no tests, no measurement; line numbers marked \"about\" are from the diff. I didn't verify RB-016, RB-017 or RB-018 findings against their release tags in this pass (outside the scope; I can do it in RB-020). NOTE: I had no `mnemo wait` running when the pointer came; one is running now.","to":"ready"},{"at":1795277117,"by":"planner-a","from":"ready","note":"planner-a 2026-11-21: RB-019 triaged: 6 accepted into spec.v0210 rev 2, RB-019.2 (delete rule) and RB-019.6 (brain identity after rekey) need the user's choice.","to":"done"}]}``
+
+```text
+REVIEWER-B: the v0.21.0 merge rules and delete markers, before build (batch RB-019)
+
+First step: recall. The user asked for a spec check before the Worker builds the merge (2026-11-21, 'Yes'). Read spec.v0210 (STEP 1 and STEP 2) and report.v0210-1. Reading only, at origin/release-0.21.0 (7f822d4): no build or benchmarks needed. Scope, and only this: (1) STEP 2's per-kind rules against live code: keyed supersession links, essence items, tasks and findings (status_history union), message acks, turns, 'anything else' with _mnemo.merge_conflict. Any record kind updated in place that the rules miss, or a rule that can lose data, resurrect a deleted record or give merge(a,b) != merge(b,a)? (2) The delete markers as built in 7f822d4 (crud.rs delete and put_tombstone, records.rs next_hlc): do they hold enough for STEP 2's rule (a keyed fact stays deleted unless the other copy wrote a newer version after the marker's hlc)? Is a forgotten record's content gone from the merged output in every case, including superseded versions and snapshots? (3) The clock: next_hlc and read_memory_meta raising the handle's stamp; is comparing hlc across two copies sound when one copy's wall clock is ahead, and with records written by v0.20.x (no hlc)? (4) The salt and key: output under the first input's salt and key; the refusals (different salts, embedder, format, existing path). (5) A sentence each: the marker's cost (about 1.1 KB, 772 B of it the sentinel vector), and a later tombstone horizon (drop old markers at compaction, a merge refuses copies diverged longer). (6) Tests in STEP 2 that are missing or don't prove what they say. Findings as records RB-019.<n>, each saying whether the spec should change before build. Then set this task ready and post REVIEW DONE: RB-019 to planner-a (mnemo post planner-a 'REVIEW DONE: RB-019'). The review at READY will be batch RB-020.
 ```
 
 ## 01M7Q2PG6MWEMS2V21TFFSKKJF
@@ -6200,6 +7661,506 @@ v0200-8: with written pages pinned through stage_commit, the page cache's evicti
 **Would I hold the tag for it?** No.
 ```
 
+## 01M7ZDF7X7PQA1PWFFX5Z433MS
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:01:46Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-019.1","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["spec.v0210","v0210-spec-review","mnemo/src/store/crud.rs","mnemo/src/store/coordination.rs","mnemo/src/store/records.rs","mnemo/src/store/maintenance.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277110,"by":"planner-a","from":"open","note":"planner-a 2026-11-21, checked at 7f822d4 (coordination.rs legacy scan looks only at episodic fact rows): into spec.v0210 rev 2. Step 1b: extend the legacy scan to working rows with the sentinel vector. Step 2: classify by decoded _mnemo.kind; a deleted catalog row with no marker counts as a delete; skip what compaction skips; the report lists one-side-only records; the docs say deletes before v0.21.0 or by an older build aren't known. The manifest records the first v0.21 stamp.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-21, checked at 7f822d4 (coordination.rs legacy scan looks only at episodic fact rows): into spec.v0210 rev 2. Step 1b: extend the legacy scan to working rows with the sentinel vector. Step 2: classify by decoded _mnemo.kind; a deleted catalog row with no marker counts as a delete; skip what compaction skips; the report lists one-side-only records; the docs say deletes before v0.21.0 or by an older build aren't known. The manifest records the first v0.21 stamp.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec: a delete with no marker (an older build, before v0.21.0, a compaction drop) comes back in a merge; and an older build's compact hides markers from the row scan
+
+**Context / Evidence:** `spec.v0210` STEP 2 (records unioned by ULID; tombstones), scope items 1 and 2; code at `7f822d4`, by reading. Nothing was built or run.
+- Only a v0.21.0 build writes a marker (`store/crud.rs`, `delete` → `put_tombstone`). An older build's delete is still only the catalog flag, which a base rewrite prunes and compaction drops (the spec's own checked fact).
+- Older builds keep writing this brain's copies: an MCP server started before an upgrade, the mobile packages (this release doesn't rebuild them), a pinned Python wheel.
+- Compaction also drops records with no marker: expired ones and messages acked over 30 days ago (`store/maintenance.rs:482-488`, `coordination.rs:593-596`).
+- An older build's `compact` writes every row again and computes "fact" for a kind it doesn't know (`records.rs:484-492`; RB-013.1). A marker is kind `tombstone`, type `working`. The scan that finds re-tagged coordination records looks only at `episodic` fact rows (`coordination.rs:249-263`), so it never finds a re-tagged marker. `kind_counts` then counts each one as a fact (`coordination.rs:2522-2538`), and `coordination_records` doesn't return it (`:207-240`).
+
+**Finding:**
+1. A record deleted in copy A with no marker, and still in copy B, is in the output. That includes a record the user forgot. The union can't tell "deleted in A" from "never in A". The spec says nothing about copies that diverged before both were on v0.21.0, or that an older build wrote since.
+2. If the merge finds markers through the row kind (the way every other coordination read does), one v0.20.x `compact` of an input makes it miss every marker in that input, and those deletes come back too.
+3. Expired records and old acked messages come back from the copy that wasn't compacted. Harmless, but it makes `merge(x, compact(x))` differ from `x`.
+
+**Recommendation:**
+- The merge classifies every record by its decoded `_mnemo.kind`, never by the row kind. Extend the RB-013.1 scan to `working` fact rows with the sentinel vector, so `about` and `kind_counts` stay right after an older build's compact.
+- The merge treats a `deleted` catalog row with no marker as a delete (no time: delete wins), for as long as the row is there.
+- The merge skips what compaction skips (expired records, `compact_drops`).
+- The spec, the guide and the command's output say plainly: a delete made before v0.21.0, or by an older build, isn't known to a merge, and the record comes back if the other copy has it. The report lists the records that came from one side only, by count and with `--format json` by id, so the user can check.
+- Worth deciding now: the file records the first clock stamp a v0.21+ build wrote (one field on the manifest). A merge can then say "deletes before <date> aren't known" for each input, and warn when an input holds a record with no stamp that is newer than that (an older build wrote it since).
+
+**Should the spec change before build?** Yes. I would hold the tag for item 1 left unsaid and item 2.
+```
+
+## 01M7ZDG4F36PRW2XFZM3C4926H
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:02:15Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-019.2","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["spec.v0210","v0210-spec-review","docs/design/sync.md","mnemo/src/store/crud.rs","mnemo/src/store/threads.rs","mnemo/src/store/records.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277110,"by":"planner-a","from":"open","note":"planner-a 2026-11-21: the rule choice is the user's, since it differs from docs/design/sync.md section 7. Planner recommends id-level deletes with no clock (a marker removes the id it names, always; a version the deleting copy never held stays and the report names the key). Accepted either way: turn markers hold thread and turn id (step 1b), markers applied first, conflict copies name their source id, a marker is void for a live record with the same id in the same copy, one marker per id.","to":"needs-user"},{"at":1795277323,"by":"planner-a","from":"needs-user","note":"user 2026-11-21 chose id-level deletes ('Keep B's newer version'): a marker removes exactly the id it names, always, with no clock; a version the deleting copy never held stays and the report names the key. Into spec.v0210 rev 2 with the rest of the recommendation (turn markers in step 1b; markers first; conflict copies name their source; void for a re-created id; one marker per id). This replaces sync.md section 7's delete rule.","to":"accepted"}],"_mnemo.triage":"user 2026-11-21 chose id-level deletes ('Keep B's newer version'): a marker removes exactly the id it names, always, with no clock; a version the deleting copy never held stays and the report names the key. Into spec.v0210 rev 2 with the rest of the recommendation (turn markers in step 1b; markers first; conflict copies name their source; void for a re-created id; one marker per id). This replaces sync.md section 7's delete rule.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec: the keyed-delete rule reads two ways and the marker can't support one; cases where forgotten content survives or a live record is lost
+
+**Context / Evidence:** `spec.v0210` STEP 2's tombstone rule, scope item 2; code at `7f822d4`, by reading.
+- A marker holds the deleted id, the key slot (`_mnemo.tombstone_key`, `_mnemo.tombstone_owner`), a stamp past the deleted record's, and the time (`store/crud.rs`, `put_tombstone`). Every delete is by id: `forget`, the MCP tool, `essence_remove`, `thread_forget`, `prune_messages`, `Session::discard`.
+- `delete` takes any version of a key, the live one or an old one in its history. The marker is the same for both.
+- A turn gets a new ULID at each ingest and is told apart by `_mnemo.turn_id` within its thread (`threads.rs:286-306`). The spec's turn rule knows that; a turn's marker holds only the ULID.
+- `remember` with the id of a deleted record makes it live again (`crud.rs:314-328`; `records.rs:1622-1632` treats it as a new record). The old marker stays.
+
+**Finding:**
+1. **The rule's text.** "A keyed fact stays deleted unless the other copy wrote a newer version of that key after the tombstone's hlc" doesn't say what happens to the other copy's version Z when it is older than the marker. Read by key (sync.md section 7, "the newest action wins"), Z is dropped. Then:
+   - the marker can't support it. Copy A forgets an old version X from key K's history. The marker says "key K, stamp t". Read by key, it removes K's live version, which A itself still holds, and any version B wrote before t;
+   - a write is lost with no trace: B's Z was never seen by the copy that deleted, and the clock decides (a copy whose clock runs ahead deletes the other's later writes).
+2. **A turn saved in both copies under two ULIDs** (a session resumed against the other copy, or `thread ingest` of an export) and forgotten in one: the marker names one ULID, the other copy's record of the same turn is kept. `thread forget` is what a user runs after pasting a secret.
+3. **A deleted record against an edit of it.** If the marker isn't applied before the per-kind rules, "anything else differing: the other content kept as a new record" can keep the forgotten content as a conflict copy. Later, forgetting a record doesn't reach a conflict copy made from it in an earlier merge.
+4. **A re-created id** is deleted by the merge, and `merge(x, x)` differs from `x`.
+5. The same record deleted in both copies leaves two markers for one id in every later output.
+
+**Recommendation:**
+- Make deletes id-level, with no clock: a marker removes the id it names, in any copy, always. A version of the key that the deleting copy never held stays, and the report names the key ("deleted in a, written in b: b's version kept"). Nothing unseen is lost, no skew matters, and the order of the inputs can't change the result.
+- If the user wants "newest action wins" kept: the marker needs one more field (the deleted version was the slot's live one), the dropped version gets its own marker in the output, and the report lists each one. Either way the tombstoned id itself never comes back.
+- A turn's marker also holds its thread and turn id (ids, not content), and the merge drops every record of that turn.
+- Markers first: a record a marker names takes part in no other rule, and no conflict copy is made of it. A conflict copy names the id it came from, and a marker for that id removes the copy too.
+- A marker is void for a live record with the same id in the same copy (it was written again after the delete).
+- One marker per deleted id in the output: the one with the larger stamp, then the larger ULID.
+- After a merge that applied markers, the command says that the input files still hold those records.
+
+**Should the spec change before build?** Yes. The marker fields are step 1 code, so this is cheapest now. I would hold the tag for items 1 to 3.
+```
+
+## 01M7ZDGM2S3CMDCKMN3X2FQM6T
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:02:31Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-019.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0210","v0210-spec-review","mnemo/src/store/keyed.rs","mnemo/src/store/coordination.rs","mnemo/src/store/essence.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277110,"by":"planner-a","from":"open","note":"planner-a 2026-11-21: into spec.v0210 rev 2: the merge is a pure function (no wall clock, no random ids); one chain per key slot relinked both ways in a stated order; conflict-copy ids derived from the source id and a content hash; tie-breaks by content hash and entry bytes; same content is not a conflict; supersession marks kept; the three-copy property tested.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-21: into spec.v0210 rev 2: the merge is a pure function (no wall clock, no random ids); one chain per key slot relinked both ways in a stated order; conflict-copy ids derived from the source id and a content hash; tie-breaks by content hash and entry bytes; same content is not a conflict; supersession marks kept; the three-copy property tested.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec: as written the rules don't give merge(a,b) = merge(b,a) or an idempotent merge: conflict copies, ties, new time values, and a key's chain
+
+**Context / Evidence:** `spec.v0210` STEP 2 (the per-kind rules and the three properties its tests check), scope item 1; code at `7f822d4`, by reading.
+- A key's chain is single-linked both ways: each version has one `_mnemo.supersedes` and one `_mnemo.superseded_by` (`store/keyed.rs:168-187`). `history_in` starts at the live record and follows `_mnemo.supersedes` (`keyed.rs:603-623`).
+- An unkeyed record can be marked superseded by another record since v0.20.2 (`keyed.rs:684-749`).
+- A keyed write with the same content as the live version writes nothing (`keyed.rs:18-49`, `:164-166`), so the same value written in both copies gives two records with the same content.
+- A task's and a finding's history entries carry `at` in seconds (`coordination.rs:1587-1612`); an essence item's are `{status, at}` (`essence.rs:672`).
+
+**Finding:**
+1. **"Union of their supersession links" isn't possible in one field.** Both copies supersede X: X has `superseded_by` Y in A and Z in B, and Y and Z both say `supersedes` X. For "both stay in history_in", the merge must write the chain again as one line (X, then the older of Y and Z, then the newer), which changes `supersedes` on the winner, a record neither copy changed. The spec doesn't say so, or in what order.
+2. **A conflict copy "kept as a new record".** With a random ULID, `merge(a,b)` and `merge(b,a)` differ, and `merge(merge(a,b), b)` adds a second copy: b's content for that ULID still differs from the output's.
+3. **Ties.** "The newer hlc" for one ULID in two copies has no rule when the stamps are equal (created_at and ULID are equal too). The "newest entry" of a status history can tie within a second.
+4. **New time values.** If the merge stamps `_mnemo.invalid_at`, `_mnemo.hlc` or `_mnemo.updated_at` from the wall clock on what it changes, two runs differ, and a later merge with a third copy sees the merge's own stamp as the newest change.
+5. **The same value in both copies** is a conflict by the rule as written ("a key written in both": the other superseded and stamped). Two sessions saving the same fact would fill `about` with conflicts.
+6. **Unkeyed supersession.** One copy marks R superseded, the other edits R later. By "the newer hlc" the edit wins whole, and R is live again in recall.
+7. Three copies are the real use (two machines and a phone export). Nothing in the spec asks that `merge(merge(a,b),c)` equal `merge(a,merge(b,c))`.
+
+**Recommendation:**
+- The merge is a pure function of the two record sets. It never reads the wall clock and never makes a random id.
+- A slot's chain: all its versions from both copies in one order (each copy's own chain order kept; versions on different branches ordered by stamp, then created_at, then ULID), linked again both ways. `invalid_at` of a version superseded by the merge is the next version's created_at.
+- A conflict copy's id comes from the original id and a hash of the content it holds, so the same copy is the same record in every run.
+- Equal stamps on one ULID: the larger hash of the record's content wins. Equal `at` in a history: order by the entry's bytes.
+- A record the merge changes keeps the larger of its two inputs' stamps.
+- Same user-visible content (the keyed write's own rule): one is live, the other superseded, no conflict stamp.
+- A supersession mark from either copy stays, whichever content wins; when the two marks name different records, the one with the larger stamp.
+- Add the three-copy property to the tests.
+
+**Should the spec change before build?** Yes: these decide the shape of the code.
+```
+
+## 01M7ZDH7YNHMBBW7VFNN6VHBGZ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:02:51Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-019.4","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0210","v0210-spec-review","mnemo/src/store/coordination.rs","mnemo/src/store/findings.rs","mnemo/src/store/essence.rs","mnemo/src/store/threads.rs","mnemo/src/store/continuation.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277110,"by":"planner-a","from":"open","note":"planner-a 2026-11-21, checked threads.rs _mnemo.part at 7f822d4: into spec.v0210 rev 2: one record per task slug and finding id (the second renamed <slug>-merge-2 and flagged); after-cycles flagged; done and verified are final; owner from the merged history; bookkeeping fields (delivery, seen lists, access counts) never conflict; text vs status per record; resolved in either copy is resolved; manifest and thread links never get conflict copies; turns keep all parts from one copy; seq may repeat.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-21, checked threads.rs _mnemo.part at 7f822d4: into spec.v0210 rev 2: one record per task slug and finding id (the second renamed <slug>-merge-2 and flagged); after-cycles flagged; done and verified are final; owner from the merged history; bookkeeping fields (delivery, seen lists, access counts) never conflict; text vs status per record; resolved in either copy is resolved; manifest and thread links never get conflict copies; turns keep all parts from one copy; seq may repeat.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec: what the per-kind rules miss: names that must stay unique, fields updated in place, finished states, and turns in parts
+
+**Context / Evidence:** `spec.v0210` STEP 2's per-kind rules against every in-place write in `mnemo/src/store/` at `7f822d4` (each `self.put` of an existing record), scope item 1. By reading.
+
+**Finding:**
+1. **Kinds found by a name, not by their ULID.** Union by ULID gives two records under one name when both copies added it:
+   - a task's slug (`coordination.rs:1504`, `:1557`); a finding's id (`findings.rs:361`). Each lookup takes one record per name, so the other is hidden but still there;
+   - a thread link, one per `thread_start` (`continuation.rs:33-51`): the same link twice;
+   - a task's `after`: each copy checks for a cycle alone (`coordination.rs:1530`), so A's "t1 after t2" and B's "t2 after t1" merge into two tasks nobody can take.
+2. **Fields the rules don't name, on kinds they do.** If these count as "differing", most shared tasks and messages differ:
+   - delivery state (`sent`, `delivered`, `seen`, `done`), `_mnemo.seen_by`, `_mnemo.ready_seen_by` (`coordination.rs:475-508`, `:2075-2137`);
+   - a task's title, body, role, `after`, `pre_approved` and refs, changed in place by a re-add (`:1504-1541`); its owner, set by `task next` and removed on `queued` (`:1694`, `:1836`);
+   - a finding's triage text, who triaged and verified it, and its visibility (`findings.rs:356`, `:414`);
+   - access counts, which are in the catalog row, not the record (`recall.rs:786-791`);
+   - the manifest: `_mnemo.default_agent` and `_mnemo.wake_paused` (`keyed.rs:93-105`, `coordination.rs:2163-2193`).
+3. **"Anything else" would copy engine records.** A conflict copy of the manifest is a second manifest, and the reads take the first they find (`keyed.rs:56-59`).
+4. **One stamp per record can't say which field changed.** A edits an essence item's text, B resolves it later: by "the newer hlc", A's text is gone with no flag. The same for a task's body against a status move.
+5. **Finished states.** "The newest entry's status" lets a later move in one copy undo `done` or `verified` from the other (A: ready to done; B, which never saw ready, active to blocked a minute later). RB-012.2 made `done` final in one file. For essence, the engine has no move from resolved back to open (`memory.rs:1076`), so "unless the open came after" never applies.
+6. **A turn is several records** when it's long (`_mnemo.part`, `threads.rs:307-322`), chunked by a size that differs between v8 and v9 ingests. "One per (thread, turn_id)" would keep one part. Each copy also numbers `_mnemo.seq` from its own end (`threads.rs:294`), so two copies' new turns share numbers.
+
+**Recommendation:**
+- Tasks and findings: one record per name. When both copies added the name, keep the one with the earlier ULID under it, and keep the other, stamped `_mnemo.merge_conflict`, under a name the report gives (`<slug>-merge-2`); a finding the same way. Never join two tasks that only share a slug. After the merge, check `after` for cycles and flag them.
+- Status: `done` and `verified` win over any other status; otherwise the newest entry. The owner comes from the merged history (the last move to active), and nothing else. An unverified SECURITY finding's visibility comes from the merged status, never from one input's record.
+- Bookkeeping fields never make a difference and never a conflict: delivery takes the furthest state, the seen lists their union, access counts the larger.
+- Text against status on one record (essence items, tasks): status from the histories; the text of the record with the larger stamp; and when both the text and the status differ, stamp the record `_mnemo.merge_conflict`, so the user sees it.
+- Essence: resolved in either copy is resolved.
+- The manifest and thread links: the larger stamp, or the one copy, never a conflict copy. Conflict copies are for facts only, and a copy keeps the original's visibility, scope and agent.
+- Turns: per (thread, turn_id), every part from the one copy whose first part has the earlier ULID. Say that `_mnemo.seq` can repeat after a merge and that order then falls to the ULID.
+- Compare records after the same vector rounding (the keyed write's rule), or refuse inputs whose float-vector settings differ.
+
+**Should the spec change before build?** Yes, for items 1, 2, 3 and 5. Items 4 and 6 need a line each.
+```
+
+## 01M7ZDHTE45K000CTFCF3JBSPY
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:03:10Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-019.5","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0210","v0210-spec-review","mnemo/src/store/records.rs","mnemo/src/store/crud.rs","mnemo/src/store/keyed.rs","docs/design/sync.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277110,"by":"planner-a","from":"open","note":"planner-a 2026-11-21: into spec.v0210 rev 2: one comparison number per record, max(_mnemo.hlc, _mnemo.updated_at ms), else created_at ms; the report gives each input's lead over the clock and warns past an hour; next_hlc notes once on stderr when the handle runs more than a day ahead.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-21: into spec.v0210 rev 2: one comparison number per record, max(_mnemo.hlc, _mnemo.updated_at ms), else created_at ms; the report gives each input's lead over the clock and warns past an hour; next_hlc notes once on stderr when the handle runs more than a day ahead.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec, the clock: sound for one record's own history; an older build leaves a stale stamp on what it rewrites, and a copy whose clock runs ahead wins every conflict
+
+**Context / Evidence:** scope item 3; `next_hlc` and the stamp in `put_checked` (`store/records.rs`, about lines 1572-1620), `read_memory_meta` (`store/crud.rs`, about 589-597), at `7f822d4`. By reading.
+- A stamp is max(now in ms, the handle's largest seen + 1, the record's own + 1). The handle's largest is raised by each record it decrypts; it starts at 0 on every open and isn't stored.
+- Every in-place rewrite reads the record first, so one record's stamps only go up, whatever the wall clock does and whichever handle writes. A new version of a key reads the live one first, so a key's chain is in stamp order inside one file. That part is sound.
+- Older builds carry `_mnemo.hlc` through as metadata they don't know.
+
+**Finding:**
+1. **A stale stamp from an older build.** A v0.20.x build that edits a stamped record in place keeps the old stamp and changes the content. Its `update` sets `_mnemo.updated_at` (`keyed.rs:517-519`), so the stamp says "old" and `updated_at` says "new". The spec's order (hlc, else updated_at, else created_at) reads the stale stamp and stops. The same record edited earlier by a v0.21 build in the other copy then wins over the later edit.
+2. **No stamp on one side.** The spec doesn't say how a stamped record compares with an unstamped one. "Stamped wins" would let an older change beat a newer one.
+3. **A copy whose clock is ahead** wins every conflict it's part of until real time passes its stamps. That is the known limit of this kind of clock and sync.md says so. Two things make it worse here:
+   - there's no bound: one write made while a clock was set to a far date leaves a stamp that every later rewrite of that record builds on, in every copy it's merged into;
+   - nothing tells the user. The merge can see it: an input whose largest stamp is ahead of the wall clock at merge time.
+4. **Across records the stamps don't order writes inside one file.** A handle knows only the stamps it decrypted. A delete of an unkeyed v9 record doesn't read it (`crud.rs`, `delete`: read only when keyed, a possible finding, or the caches are built), so its marker's stamp can be below the record's. That is harmless while an unkeyed delete always wins, and a reason not to add a rule that compares a marker with the record it names.
+
+**Recommendation:**
+- One number per record for every comparison: the larger of `_mnemo.hlc` and `_mnemo.updated_at` in ms; with neither, `created_at` in ms. That covers items 1 and 2 with one rule.
+- The merge's report gives, for each input, how far its largest stamp is ahead of the clock at merge time, and warns past a threshold (an hour is generous for a laptop). `--format json` carries the number.
+- `next_hlc`: when the handle's largest seen is more than a day ahead of now, keep going past it (it must, for the record's sake) and say so once on stderr in the CLI. The cap can come later; the notice is cheap.
+- If RB-019.2's id-level deletes are taken, no delete rule reads the clock at all, which removes the case where skew loses a write to a delete.
+- The merge copies stamps and never makes one from the wall clock (RB-019.3).
+
+**Should the spec change before build?** Yes for the comparison rule (items 1 and 2) and the report line (item 3). Item 4 is a note.
+```
+
+## 01M7ZDJJEGV1ZY1375VXWHH59N
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:03:35Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-019.6","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0210","v0210-spec-review","mnemo/src/store/maintenance.rs","mnemo/src/store/open.rs","mnemo/src/crypto.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277110,"by":"planner-a","from":"open","note":"planner-a 2026-11-21, checked maintenance.rs rekey_unchecked draws random_salt: the identity rule is the user's. Planner recommends: same brain when the salts match or both manifests have the same ULID; the second input then needs its own secret. Accepted either way: a new data key for the output (wrapped key differs from both inputs), the added refusals (dimensions, no embedder identity, a torn header, a v8 input, the output being an input), a temp file put in place without overwriting, only the engine's own cache entry carried.","to":"needs-user"},{"at":1795277323,"by":"planner-a","from":"needs-user","note":"user 2026-11-21 chose 'still the same brain': two inputs are one brain when their salts match or both manifests have the same ULID; the second input then needs its own secret. Into spec.v0210 rev 2 with items 3 to 8 (new data key, refusals, no-overwrite placement, only the engine's cache entry).","to":"accepted"}],"_mnemo.triage":"user 2026-11-21 chose 'still the same brain': two inputs are one brain when their salts match or both manifests have the same ULID; the second input then needs its own secret. Into spec.v0210 rev 2 with items 3 to 8 (new data key, refusals, no-overwrite placement, only the engine's cache entry).","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec, salt and key: a rekeyed copy of the same brain is refused for good; the output's key handling is right if it follows compaction; refusals to add
+
+**Context / Evidence:** scope item 4; code at `7f822d4`, by reading.
+- `rekey` draws a new random salt and wraps the same data key again (`store/maintenance.rs`, `rekey_unchecked`: `crypto::random_salt()`, then `wrap_dek(.., self.pager.dek())`).
+- Compaction keeps the salt and makes a new file, which draws a new data key (`maintenance.rs:940-953`, `create_temp` at `:1468`; `store/open.rs:320-324`).
+- Page nonces are random per writable open (`crypto.rs:302-318`), so they don't depend on the file being the only one under its data key.
+- A read-only open holds the shared lock for the handle's life, and refuses a file whose header a crashed writer left torn (`open.rs`, the doc above `open_read_only`).
+
+**Finding:**
+1. **"Different salts: different brains" is wrong after a rekey.** A copy that was rekeyed has a new salt and is still the same brain. No command sets a salt, so the two copies can never be merged again. A rekey is what a careful user does after a key may have leaked, which is also when old copies exist.
+2. **Same salt doesn't prove same brain either way,** but the cases are narrow: a salt is random, and only compaction (and now the merge) passes one on. So the salt is a fair default, and wrong only for item 1.
+3. **The output's key.** "Under the first input's salt and key" is sound if it means what compaction does: the first input's secret, its kind, its salt and its KDF settings (never lower; a passphrase raised to the floor), and a new data key drawn for the new file. It must not copy an input's wrapped key into the output. The spec should say "a new data key", and a test should check that the output's wrapped key differs from both inputs'.
+4. **With equal salts one secret opens both inputs** (the wrapping key is the secret plus the salt). If item 1 is fixed, the second input needs its own secret, which the library call and the CLI must take.
+5. **Not in the refusal list:**
+   - different dimensions, or one input with no embedder identity (a file whose vectors the app supplies);
+   - an input that needs a write open first (a torn header): say which command fixes it;
+   - an output path that is one of the inputs through a link (the "exists" check covers it; say so in a test);
+   - a v8 input: a read-only open accepts v8, so the format check must be the merge's own.
+6. **Writing the output.** Like compaction: a temporary file in the output's directory, created owner-only, synced, then put in place with a call that fails if the name exists (a check followed by a rename can overwrite a file made in between). On any error nothing is left behind.
+7. **The inputs stay locked for readers only, for the whole merge.** On a live brain that holds every writer out (the hooks wait 2 s and then skip their save). The guide should say to merge copies, as step 4 does.
+8. **The result cache** isn't a record, and the spec doesn't mention it. Cached results hold content. Carry only the engine's own entry (the embedder identity, as `copy_live_into` does for reserved entries, `maintenance.rs:508-531`) and drop the rest, so no cached result keeps a deleted record's text.
+
+**Recommendation:**
+- Identity: equal salts, or, when both inputs have a manifest, the same manifest ULID (it's made once per brain and survives rekey and compaction). A refusal for different salts with different manifests names both. Or keep the salt rule and add a flag that says "these are the same brain", with the reason text explaining a rekey. The user may prefer the strict rule; it should be chosen knowing item 1.
+- Add the lines in items 3 to 8 to the spec.
+
+**Should the spec change before build?** Yes for items 1, 3, 5 and 8; the rest are lines for step 3's docs.
+```
+
+## 01M7ZDK14JRSJVD86GS1J61XKB
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:03:50Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-019.7","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["spec.v0210","v0210-spec-review","report.v0210-1","mnemo/src/store/threads.rs","mnemo/src/store/coordination.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277110,"by":"planner-a","from":"open","note":"planner-a 2026-11-21: no marker horizon (it waits for sync change sets and their version vectors); prune_messages writes no marker and the merge applies compaction's drop rule instead (step 1b); a thread forget's markers ride on RB-019.2's turn fields; the vector entry stays; CHANGELOG and guide say a delete no longer shrinks the file.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-21: no marker horizon (it waits for sync change sets and their version vectors); prune_messages writes no marker and the merge applies compaction's drop rule instead (step 1b); a thread forget's markers ride on RB-019.2's turn fields; the vector entry stays; CHANGELOG and guide say a delete no longer shrinks the file.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec, the marker's cost and a later horizon: fine per delete, heavy for bulk deletes; a horizon needs something no copy records today
+
+**Context / Evidence:** scope item 5; `report.v0210-1`'s measured cost (1,089.5 file bytes a delete at 1,000 deletes, 1,074.8 at 5,000; the record 184 bytes, the vector entry 772); code at `7f822d4`, by reading. I measured nothing.
+- One marker per deleted record: `thread_forget` deletes turn by turn (`store/threads.rs:549-551`), `prune_messages` message by message (`coordination.rs:579-581`).
+- Compaction drops the same old acked messages with no marker (`maintenance.rs:486-488`).
+
+**The two sentences asked for:**
+1. **The cost.** About 1.1 KB a delete, so a delete frees nothing, is acceptable for single forgets and facts; it is wrong for bulk deletes, where forgetting a 5,000-record thread leaves about 5.4 MB of markers for good, and 772 of each 1,089 bytes is a vector nobody reads.
+2. **A horizon.** Dropping old markers at compaction is safe only if a merge can refuse a pair that diverged before the drop, and for a record older than the drop that only the other copy holds it can't tell a delete here from a write there, because nothing in a file says when it last matched another copy (a `cp` leaves no trace); so the horizon belongs with the sync change sets, whose version vectors record exactly that, and no marker should be dropped before then.
+
+**Finding and recommendation:**
+- `prune_messages` needs no markers: the merge can apply compaction's own rule (an acked message past the keep time is dropped from both inputs), and then a pruned message can't come back. It's a CLI command today (`bin/mnemo.rs:5449`), so the saving is small, but it removes one of the two rules for the same thing.
+- A forgotten thread could leave one marker for the thread (its id and the stamp) in place of one per turn; with RB-019.2's turn marker fields that's the same information. Worth doing with that change, or noting as later work.
+- Leaving the vector entry in place for v0.21.0 is right: an empty slot changes what a row means, which is a format question.
+- Say in the CHANGELOG and the guide that a delete no longer shrinks the file (the report's deviation 2), since `compact` used to be the answer and now isn't for markers.
+
+**Should the spec change before build?** No. The thread marker rides on RB-019.2 if that's accepted.
+```
+
+## 01M7ZDKHJY95ABHM26F9DTH3BM
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T16:04:07Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-019","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-019.8","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0210","v0210-spec-review","mnemo/src/store/records.rs","mnemo/src/store/coordination.rs","mnemo/tests/merge_groundwork.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795277111,"by":"planner-a","from":"open","note":"planner-a 2026-11-21: into spec.v0210 rev 2's tests: a dev-hooks clock offset for next_hlc first (step 1b); the three properties restated as RB-019.8 says; the 12 cases added, including fixtures written by the published v0.20.2.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-21: into spec.v0210 rev 2's tests: a dev-hooks clock offset for next_hlc first (step 1b); the three properties restated as RB-019.8 says; the 12 cases added, including fixtures written by the published v0.20.2.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge spec, the tests: three in the list don't prove what they say, the clock can't be set in a test, and the cases to add
+
+**Context / Evidence:** `spec.v0210` STEP 2's TESTS, scope item 6; code at `7f822d4`, by reading.
+- `next_hlc` reads `SystemTime::now()` directly (`store/records.rs`, about 1575-1582). The dev-hooks clock offset moves only `coordination_now` (`coordination.rs:778-796`).
+
+**Three that don't prove what they say:**
+1. **"Every record visible in VisibilitySet::ALL survives"** is false by design (markers, duplicate turns) and too weak where it holds: it checks ids, so a version of a record lost in a conflict passes. The property to test: every (id, content) pair from either input is in the output, as the record or as a conflict copy, unless a marker names it or it's a second copy of a turn; and nothing a marker names is in the output under any id.
+2. **"merge(a,b) and merge(b,a) give the same live records and key slots"** misses where the order can show: each key's `history_in`, the superseded flags, the conflict stamps and conflict copies' ids, the marker set, each task's and finding's status and history, and the report's counts (mirrored). Say what is allowed to differ: claims, presence, the salt.
+3. **The proptests run both copies on one machine's clock,** so stamps follow real order, never tie and never skew. The cases that break symmetry can't happen in them.
+
+**Needed first:** a dev-hooks setter for a handle's clock (an offset in ms for `next_hlc`), so a test can make one copy run ahead, behind, or stamp the same millisecond as the other.
+
+**To add:**
+1. Equal stamps on one ULID in two copies; equal `at` in two history entries.
+2. One copy an hour ahead: the result follows the stamps, and the report says how far ahead (RB-019.5).
+3. Three copies: `merge(merge(a,b),c)` equals `merge(a,merge(b,c))`; and `merge(merge(a,b),a)` equals `merge(a,b)`.
+4. `merge(x, x)` with deletes, a re-created id, expired records and a pruned message in x.
+5. Inputs an older build wrote, as committed fixtures made by the published v0.20.2 (the way `tests/fixtures/v8/` is made): records with no stamp, a delete with no marker, a stamped record it edited in place, and a file it compacted after v0.21 wrote markers (RB-019.1).
+6. A forgotten record, checked through every read: recall in ALL, `history_in`, conflict copies, a thread export, keyword recall for a word only it held, and the result cache. With the other copy having edited it, and a turn saved in both copies under two ids (RB-019.2).
+7. Both copies supersede one version; one supersedes and one edits in place; the same value written in both (no conflict).
+8. Two tasks with one slug, two findings with one id, an `after` cycle across copies, `done` against a later move (RB-019.4).
+9. Each refusal, with its reason text; a rekeyed copy; an input that needs a write open; the output path being an input.
+10. The inputs' bytes are the same before and after (a read-only open that tracks access or raises a stamp must not write).
+11. A failure in the middle (failpoints) leaves no output file; the output opens with the first input's secret and its wrapped key differs from both inputs'.
+12. An output merged again after new writes on it: the new stamps go past both inputs' for the records they touch.
+
+**Not for CI:** time and memory for two 100K copies; measure it in step 4's dogfood and report it.
+
+**Should the spec change before build?** Add them to the list; the clock hook first.
+```
+
+## 01M84WSHQX10H7YN44GVQQHXEK
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:05:44Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-020","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-020.1","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["mnemo/src/store/merge.rs","mnemo/src/store/records.rs","mnemo/src/store/keyed.rs","spec.v0210","decision.v0210-chain-rule"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795460872,"by":"planner-a","from":"open","note":"Checked at 8b52e90: key_of (merge.rs ~1317) falls back to the min over hlc_prev and number(m) when _mnemo.first_hlc is missing, and put sets first_hlc only on a new record (records.rs 1701), so a pre-v0.21 version superseded by v0.21 sorts after its successor. It hits every key in our own brain at the RC install. Fix in v0210-5f: order a slot from the write-made links first (a version after the one it was written over, through deleted ones), the number only between versions with no written path; the fallback for a record without first_hlc is created_at in ms; put gives an in-place rewrite of a record without first_hlc one from created_at. Fixtures from the published v0.20.2 with keyed records (one and two versions) written again by this build; merge(x,x)=x and the laws on them; the same-second older-build case. Holds the tag.","to":"accepted"}],"_mnemo.triage":"Checked at 8b52e90: key_of (merge.rs ~1317) falls back to the min over hlc_prev and number(m) when _mnemo.first_hlc is missing, and put sets first_hlc only on a new record (records.rs 1701), so a pre-v0.21 version superseded by v0.21 sorts after its successor. It hits every key in our own brain at the RC install. Fix in v0210-5f: order a slot from the write-made links first (a version after the one it was written over, through deleted ones), the number only between versions with no written path; the fallback for a record without first_hlc is created_at in ms; put gives an in-place rewrite of a record without first_hlc one from created_at. Fixtures from the published v0.20.2 with keyed records (one and two versions) written again by this build; merge(x,x)=x and the laws on them; the same-second older-build case. Holds the tag.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge: a key whose version was written before v0.21 and then superseded by v0.21 gets its OLD value back as live after any merge, with nothing reported
+
+EVIDENCE (run in my own clone at 8b52e90, CARGO_TARGET_DIR=/tmp/rb-target, --locked). A file written by the PUBLISHED v0.20.2 engine (the fixture generator's Cargo.toml and lock, my own main.rs): key `k` with one version, key `k2` with two. This build then writes each key once more (remember_keyed), the file is copied, and the two identical copies are merged (merge_files, the copy as b).
+- history_in before the merge: k = ["k as v0.21 wrote it", "k as v0.20.2 wrote it"]; k2 = ["k2 third, by v0.21", "k2 second, by v0.20.2", "k2 first, by v0.20.2"].
+- after merge(x, x): k = ["k as v0.20.2 wrote it", "k as v0.21 wrote it"]; k2 = ["k2 second, by v0.20.2", "k2 third, by v0.21", "k2 first, by v0.20.2"].
+- live versions before: the two v0.21 texts. After: "k as v0.20.2 wrote it" and "k2 second, by v0.20.2". The v0.21 versions are marked superseded.
+- The report: conflicts {}, removed [], nothing flagged. The same happens with a record this build wrote and then stripped of v0.21's keys (a second probe), so it isn't special to the fixture.
+
+CAUSE. relink_slots orders a key's versions by "the number each was first written with" (mnemo/src/store/merge.rs:1315-1332): `_mnemo.first_hlc`, else the smallest of the record's `_mnemo.hlc_prev` stamps and number(m). put sets `_mnemo.first_hlc` only on a new record (records.rs:1698-1702, `if !live`). The keyed write puts the new version first and rewrites the old one in place second (keyed.rs:244-254), and that rewrite is stamped. So an older build's version, which has no first_hlc and no `_mnemo.ver` (so no hlc_prev either), gets as its only number the stamp of the moment it was superseded, which is LATER than the first_hlc of the version that superseded it. In my run: old `_mnemo.hlc` 1795460107157, new `_mnemo.first_hlc` 1795460107144. The old version sorts last, and the last of the chain is live. The comment at merge.rs:1187 ("a write's stamp is past the one it supersedes") isn't true for these records. The versions' own write-made links (`_mnemo.supersedes`, read by written_over) say the right order and the sort ignores them.
+
+WHY THE TESTS MISSED IT. The v0.20.2 fixtures hold no keyed record (tests/fixtures/v0_20_2/generator/src/main.rs writes three plain facts and a manifest). The proptests write every record with this build. report.v0210-2 lists the fallback's fold as a surviving mutation that "no write can reach"; this write reaches the line after it.
+
+REACH. Every key that exists in a brain at the upgrade, the first time v0.21 writes it again and the file is then merged with anything (a copy of itself included). On the project brain that is every decision.*, spec.*, report.* and status.* key rewritten after the RC install. Also by reading: remember_keyed_superseding adopting a record an older build wrote (same in-place rewrite); and an older build writing a key over a v0.21 version within the same second (its number is created_at in whole seconds, which can be below the v0.21 version's first_hlc).
+
+RECOMMENDATION.
+1. Order a slot from the write-made links first: a version always comes after the version it was written over (written_over, through deleted ones via gone_over). Use the number only between versions with no written path between them. That is decision.v0210-chain-rule's own wording ("from write-made links and first-written stamps").
+2. For a record with no `_mnemo.first_hlc`, the fallback is created_at in ms (an older build never stamped at creation), never its latest stamp.
+3. Optional: put gives an in-place rewrite of a record with no first_hlc one from created_at, so later merges don't depend on the fallback.
+4. Tests: fixtures from the published v0.20.2 with a key of one version and a key of two, each written again by this build; merge(x, x) = x and the two-copy laws on them; a proptest op that writes a record as an older build would (no stamps), keyed included; an older build's keyed write over a v0.21 version in the same second (frozen clock).
+
+HOLD THE TAG: yes. It changes live values silently on the first merge after the upgrade.
+```
+
+## 01M84WSHS9M29PZ3TDQ1H3F11Y
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:05:45Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-020","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-020.2","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/store/merge.rs","mnemo/tests/merge_v0_20_2.rs","mnemo/src/bin/mnemo.rs","spec.v0210","RB-019.1"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795460872,"by":"planner-a","from":"open","note":"Checked: a deleted row's id goes into removed for that merge only (merge.rs ~907) and the output carries no tombstone for it. Fix in v0210-5f, items 1, 2, 3 and 4: a tombstone (deterministic id, _mnemo.tombstone_of, fixed stamp) for every markerless deleted row in an input, removed or not, so the laws hold for older files too; the cost (about 1.1 KB per older deleted row since the copy's last compaction) is one-time and acceptable; report the count on a copy of our brain. Reword the CLI note. Holds the tag.","to":"accepted"}],"_mnemo.triage":"Checked: a deleted row's id goes into removed for that merge only (merge.rs ~907) and the output carries no tombstone for it. Fix in v0210-5f, items 1, 2, 3 and 4: a tombstone (deterministic id, _mnemo.tombstone_of, fixed stamp) for every markerless deleted row in an input, removed or not, so the laws hold for older files too; the cost (about 1.1 KB per older deleted row since the copy's last compaction) is one-time and acceptable; report the count on a copy of our brain. Reword the CLI note. Holds the tag.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge: a delete with no marker is applied once and not kept; merge the output again with the copy that still holds the record and it comes back
+
+EVIDENCE (run in my clone at 8b52e90). The committed fixtures plain_deleted.mnemo (v0.20.2 deleted "fact b": a deleted row, no tombstone) and plain_base.mnemo (still holds it):
+- out1 = merge(plain_deleted, plain_base): facts ["fact a", "fact c"]. Right.
+- out2 = merge(out1, plain_base): facts ["fact a", "fact b", "fact c"]. The deleted fact is back.
+So merge(merge(a, b), b) != merge(a, b), one of spec.v0210's laws.
+
+CAUSE. A deleted row's id goes into `removed` for this one merge (mnemo/src/store/merge.rs:907-912). The output is only the surviving records (merge_core returns them; merge_files writes them with put_existing, merge.rs:2038-2040): no deleted row is carried and no tombstone is written for the id. The output therefore knows nothing of the delete.
+
+WHY THE TESTS MISSED IT. tests/merge_v0_20_2.rs:141 (an_older_builds_delete_with_no_tombstone_is_a_delete) checks one merge only. The proptests can't make this state: every delete by this build writes a tombstone, and as_input() passes an output on with an empty deleted list, which is faithful to the file but means no markerless delete ever enters.
+
+REACH. Every delete and forget made before v0.21 that is still a deleted row in one copy while another copy holds the record (the dogfood's ten forgotten turns in report.v0210-4 took this path; by reading, I didn't rerun it), and message prunes (report.v0210-1b's note i already says a pruned message can return). A user who merges laptop and desktop, keeps working on the output, and later merges the desktop file in again gets forgotten records back.
+
+THE CLI'S NOTE (mnemo/src/bin/mnemo.rs, print_merge_report) says "a merge doesn't know deletes made by an older build". For a deleted row that is still in the file it does know and applies it (the dogfood removed 10 that way), and the note says nothing about the record returning on a later merge.
+
+RECOMMENDATION.
+1. The merge writes a tombstone into the output for each id it removed on a deleted row's word: an id derived from the target id as copy_id derives a copy's (so every run gives the same), `_mnemo.tombstone_of` only, a fixed stamp, no time. keep_one_tombstone already keeps one per target.
+2. Three copies: when the copy merged first with the deleting one doesn't hold the record, (a+c)+b still brings it back unless a tombstone is written for every markerless deleted row, removed or not. That costs about 1.1 KB per deleted row since the copy's last compaction (report.v0210-1's figure). Either do that, or say this limit in the report's note. The Planner's call; I'd do it, since it also makes the laws true for older files.
+3. Reword the note: older deletes that are still in the file are applied; ones a compaction already dropped aren't known.
+4. Tests: merge(merge(a, b), b) and merge(merge(a, b), a) on the plain fixtures; a proptest op for a markerless delete (pass the id in the input's deleted list and drop its tombstone).
+
+HOLD THE TAG: yes for item 1 (small) or, failing that, item 3's wording.
+```
+
+## 01M84WT2BDWECEEE12698Z9KXS
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:06:01Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-020","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-020.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/store/merge.rs","mnemo/src/store/records.rs","mnemo/tests/merge.rs","mnemo/guide/guide.md","decision.v0210-conflict-flags","RB-019.2"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795460872,"by":"planner-a","from":"open","note":"Checked: gone() removes a record whose _mnemo.merge_source is in removed (merge.rs ~943), so forgetting the winner takes the copy the user kept. Fix in v0210-5f: (1) a copy an input holds live beside its source's tombstone stays (the turns' saved_again rule); a tombstone from an input without the copy still takes it. (2) the report counts conflict copies dropped because their record was edited since the merge, with ids in JSON and a table line. (3) the guide says how to settle a conflict. (4) proptest ops on an output. (b)'s rule stays as decision.v0210-conflict-flags (3) wrote it. REV-019 may refine the wording.","to":"accepted"}],"_mnemo.triage":"Checked: gone() removes a record whose _mnemo.merge_source is in removed (merge.rs ~943), so forgetting the winner takes the copy the user kept. Fix in v0210-5f: (1) a copy an input holds live beside its source's tombstone stays (the turns' saved_again rule); a tombstone from an input without the copy still takes it. (2) the report counts conflict copies dropped because their record was edited since the merge, with ids in JSON and a table line. (3) the guide says how to settle a conflict. (4) proptest ops on an output. (b)'s rule stays as decision.v0210-conflict-flags (3) wrote it. REV-019 may refine the wording.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge: after the user settles a conflict by forgetting or editing the record that won, the next merge (even of the file with itself) drops the conflict copy without saying so
+
+EVIDENCE (run in my clone at 8b52e90). A fact edited in both copies; the merge keeps "edited in b" as the record and "edited in a" as a flagged conflict copy. Then the user changes the OUTPUT, x, and x is merged with a copy of itself:
+(a) The user forgets the record that won and keeps the copy (the copy has the text they want). x = ["edited in a" (copy)]. merge(x, x) = []. The report: removed 1. Merging x with either original input gives [] too. Both texts are gone from the output.
+(b) The user edits the record that won (importance only; the text is untouched). x = [copy, record]. merge(x, x) = [record]. The report: conflicts {}, removed 0, dropped 0. Nothing says a record went.
+Controls that behave well: forgetting the copy keeps it forgotten in later merges with either input; editing the copy's own text keeps the edited copy.
+So merge(x, x) != x on two states a user reaches in one step after a merge.
+
+CAUSE.
+(a) mnemo/src/store/merge.rs:941-947: a record whose `_mnemo.merge_source` is in `removed` is gone. That is spec.v0210 rule (1), "a marker for that id removes the copy too", which came from RB-019.2 and was meant for a forget made in a copy that never saw the conflict copy. Here the same file holds the tombstone and the copy the user chose to keep. The copy also stays readable until some later merge, so the forget doesn't take it at once either.
+(b) put removes `_mnemo.merge_heads` on every stamped write (records.rs, put_checked), and merge.rs:1133-1150 drops a copy whose text is no longer among its source's heads. This is decision.v0210-conflict-flags (3) as written, and tests/merge.rs:1629 (an_output_merged_with_its_own_later_edit_keeps_no_copy) asserts it. But any edit counts as settling, and the report has no line for it.
+
+DOCS. The guide's "Merge two copies" (mnemo/guide/guide.md:297-317) and the CLI's help say a conflict is flagged and where to see it. Neither says how to settle one, or that these two ways drop the copy at the next merge.
+By reading, not run: a key's version that a merge superseded and flagged stays flagged in every later merge, since nothing is ever written over it (relink_slots flags every head but the last while heads differ); only forgetting that version clears the count in `about`. That one is REVIEWER-A's to weigh.
+
+WHY THE TESTS MISSED IT. No proptest op runs after a merge, so x is never an output the user changed.
+
+RECOMMENDATION.
+1. A copy that an input holds live beside its source's tombstone stays: the user saw it and kept it. A tombstone from an input that doesn't hold the copy still takes it. This is the rule turns already have (saved_again, merge.rs:891-938), so the grouping argument is the same.
+2. The report counts conflict copies dropped because their record was edited since the merge (the ids with --format json), and the table prints the line.
+3. The guide says how to settle a conflict: forget the copy, or edit the record (its copy then goes at the next merge), and what forgetting the record does.
+4. Proptests: after a merge, run ops on the output (edit or forget the record that won, edit or forget the copy), then check merge(x, x) = x and merge(x, input) for it.
+
+HOLD THE TAG: yes for (a), by item 1 or at least items 2 and 3. (b) is the Planner's decision working as designed; it needs the report line and the guide.
+```
+
+## 01M84WVJNZDRY7A6ZJ56NXXPGW
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:06:51Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-020","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-020.4","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/tests/proptest_merge.rs","mnemo/tests/merge.rs","RB-020.1","RB-020.2","RB-020.3"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795460872,"by":"planner-a","from":"open","note":"Ops 1-3 (an older build's record, plain and keyed; a markerless delete with the output merged again; writes on an output) go into v0210-5f with the fixes they would have found, plus a few cases run through merge_files and a reopen. Ops 4-12 and the two property gaps go to status.backlog-small after v0.21.0.","to":"accepted"}],"_mnemo.triage":"Ops 1-3 (an older build's record, plain and keyed; a markerless delete with the output merged again; writes on an output) go into v0210-5f with the fixes they would have found, plus a few cases run through merge_files and a reopen. Ops 4-12 and the two property gaps go to status.backlog-small after v0.21.0.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge proptests: the laws hold for what they generate, but they never generate an older build's record, a delete with no marker, or a write on an output
+
+EVIDENCE. Read mnemo/tests/proptest_merge.rs at 8b52e90 and ran it: with the default 24 cases, 6 passed in 15.4 s; with PROPTEST_CASES=384, 6 passed in 121.0 s, no new seed saved. The regressions file has 25 `cc` lines; I didn't re-derive the mapping of the 25 saved cases to the three tests (report.v0210-4c did). tests/merge.rs 62, merge_cli 3, merge_groundwork 12, merge_v0_20_2 4 (1 ignored) all pass with --features failpoints.
+
+WHAT THE PROPERTIES DO EXERCISE. Commutative (records and the mirrored report), merge(x,x) = x, merge(merge(a,b),a|b) = merge(a,b), associative on three copies, four groupings with a copy of a copy, a copy merged with its own later copy, clocks at 0, +1 ms and one hour either way. They run the rules (__merge_records_for_testing), not merge_files; the file round trip is in tests/merge.rs (check_laws).
+
+WHAT THEY LACK. Each of RB-020.1, .2 and .3 is a law that fails on a state the generator can't reach:
+1. A record as an older build wrote it: no `_mnemo.hlc`, `_mnemo.ver` or `_mnemo.first_hlc`, plain and keyed, then written again by this build (RB-020.1).
+2. A delete with no marker: the id in the input's deleted list and no tombstone; and the output merged again (RB-020.2).
+3. Any write on an output before the next merge: edit or forget the record that won, edit or forget a conflict copy (RB-020.3). The copy-of-a-copy case writes on a copy of an input, never on a merge's output.
+Also absent, and passing in my hand probes or covered only by one unit test each:
+4. remember with a deleted record's id (the void marker). My probe: the laws hold.
+5. update of a keyed version in place (Edit picks unkeyed facts only), alone and against a new write of the key. My probe: the laws hold.
+6. Forgetting a superseded middle version of a key (ForgetKeyed takes the live one only); unit tests cover it.
+7. Findings (add, triage, verify), a task moved to done, tasks with `after`.
+8. The unkeyed supersede(old, by).
+9. Essence add and remove; a second essence item; a thread-scoped item.
+10. More than one thread, a turn in several parts, and the same turn saved under different ids in three copies with a forget in one (my probe of the last: gone in every grouping).
+11. A record with a time to live, and a message old enough for compaction's drop rule.
+12. A key in another owner's slot, or a shared-scope key.
+
+TWO PROPERTY GAPS.
+- nothing_deleted_survives checks a deleted id and conflict copies of it. It doesn't check a forgotten turn under another id, which is the "under any id" part of the spec's wording (unit tests do).
+- covered() looks at facts only. An essence item's, a task's or a finding's losing text is kept nowhere in the output (conflict copies are for facts only, by the spec), so no property could check it; the flag points at a text that only the input files still hold.
+
+RECOMMENDATION. Add ops 1 to 3 before the tag, with the fixes they'd have found; 4 to 12 as time allows. Run the three properties on files for a few cases too (merge_files and a reopen), since put_existing and the reopen are part of what a user gets.
+
+HOLD THE TAG: no on its own; ops 1 to 3 belong with the fixes for RB-020.1 to .3.
+```
+
+## 01M84WVJQQH8Z1YWCJCDD1G34J
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:06:51Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-020","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-020.5","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/store/records.rs","mnemo/src/store/merge.rs","mnemo/tests/merge_v0_20_2.rs","decision.v0210-ancestry"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795460872,"by":"planner-a","from":"open","note":"Checked: put lists the rewritten version in hlc_prev only when it has a stamp and _mnemo.ver. Fix in v0210-5f: when put rewrites in place a record with no stamp, it adds own_head's (number(old), version_hash(old)) to hlc_prev, so a one-sided first edit after the upgrade wins with no copy; the fixture test then expects no conflict, and an older build's edit on both sides still conflicts. Small, and it shapes every upgraded user's first merge.","to":"accepted"}],"_mnemo.triage":"Checked: put lists the rewritten version in hlc_prev only when it has a stamp and _mnemo.ver. Fix in v0210-5f: when put rewrites in place a record with no stamp, it adds own_head's (number(old), version_hash(old)) to hlc_prev, so a one-sided first edit after the upgrade wins with no copy; the fixture test then expects no conflict, and an older build's edit on both sides still conflicts. Small, and it shapes every upgraded user's first merge.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge: v0.21's first edit of any record written before v0.21 is taken as a conflict with the untouched copy, though put could record what it edited
+
+EVIDENCE (run in my clone at 8b52e90). Two copies of the fixture plain_base.mnemo (written by the published v0.20.2). In one copy only, this build changes the importance of "fact a" (update). The other copy never touches it. merge: conflicts {"fact": 1}, one record flagged, and the output holds "fact a" twice (the record and a conflict copy). tests/merge_v0_20_2.rs:152 (records_with_no_stamp_edited_on_one_side_fall_back_to_a_copy) asserts this for a text edit and calls it conservative.
+
+CAUSE. put lists the version it rewrites in `_mnemo.hlc_prev` only when that version has a stamp and a `_mnemo.ver` (records.rs put_checked: `if let (true, Some(v)) = (prev > 0, old_ver)`). An older build's record has neither, so the edited version names no ancestor, covers() is false both ways (mnemo/src/store/merge.rs:439-443), and the two are treated as concurrent.
+
+WHY IT MATTERS. At the upgrade every record in a brain is unstamped. Until a record has been edited once by v0.21 in both copies' common past, each one-sided edit of it shows as a conflict with a copy: an importance change, a text update, a visibility change, and for essence items a flag. decision.v0210-ancestry rejected option C because "every one-sided edit a conflict buries the real ones"; for the first merges after the upgrade that is what happens. Nothing is lost, and keyed rewrites, tasks' status and messages aren't affected (they merge by their own rules).
+
+RECOMMENDATION. When put rewrites in place a record that has no stamp, it adds the pair the merge itself computes for an unstamped version, own_head's (number(old), version_hash(old)) (merge.rs:374-383), to `_mnemo.hlc_prev`. That needs the stored record, which update and the keyed write have already read; a plain overwrite by id would cost one decrypt. covers() then sees the edit as a descendant and it wins whole with no copy. Tests: the fixture case above expects no conflict; an older build's edit on both sides still conflicts (tests/merge.rs:859). If it isn't done for v0.21.0, the CHANGELOG and the guide should say the first merges after an upgrade flag one-sided edits of older records.
+
+A smaller mixed-version point, by reading: an older build that edits a merged record keeps `_mnemo.merge_heads`, `_mnemo.merge_conflict` and `_mnemo.merge_status_conflict` (it carries `_mnemo.*` keys through), so a flag the user settled with the older build stays until a v0.21 write. Harmless, and conservative.
+
+SCOPE ITEM 3, the other reserved keys, by reading: a caller can't set or change any of them (remember refuses `_mnemo.*` on a new record and requires an overwrite's to equal the stored ones, crud.rs:333-366; update and import go through the same checks). `_mnemo.first_hlc`: put sets it once on a new record, nothing strips it, an older build carries it. `_mnemo.merge_linked`: the merge sets and clears it, put strips it on a new record only. `_mnemo.merge_status_conflict` and `_mnemo.merge_heads`: put strips them on every stamped write. `_mnemo.tombstone_supersedes`: delete writes it from the record's written link (crud.rs:519-527), nothing changes it. The one wrong assumption I found is RB-020.1's (a record with no first_hlc).
+
+HOLD THE TAG: no, if the docs say it; I'd fix it now because it's small and it shapes the first merge every upgraded user runs.
+```
+
+## 01M84WVJS0VQVQZVPR1M344F50
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:06:51Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-020","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-020.6","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/src/store/merge.rs","mnemo/tests/merge.rs","mnemo/src/bin/mnemo.rs","mnemo/src/store/open.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795460872,"by":"planner-a","from":"open","note":"All in v0210-5f: (1) the data-key test unwraps both keys and compares them. (2) the wrong-passphrase error names the input and --b-passphrase; MNEMO_B_PASSPHRASE and a prompt at a terminal; b's key-store entry is looked up whenever b has no flag. (3) remove the dead branch and its comment, or read the link before the delete rule. (4) the doc comment and the 'already exists' refusal mention a leftover from an interrupted merge. (5) relink a keyed manifest's slot like a fact's. (6) the doc nit.","to":"accepted"}],"_mnemo.triage":"All in v0210-5f: (1) the data-key test unwraps both keys and compares them. (2) the wrong-passphrase error names the input and --b-passphrase; MNEMO_B_PASSPHRASE and a prompt at a terminal; b's key-store entry is looked up whenever b has no flag. (3) remove the dead branch and its comment, or read the link before the delete rule. (4) the doc comment and the 'already exists' refusal mention a leftover from an interrupted merge. (5) relink a keyed manifest's slot like a fact's. (6) the doc nit.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge at READY, smaller points: the data-key test proves nothing, the second copy's passphrase has only a flag, a dead branch, a non-atomic fallback, a keyed manifest
+
+All at 8b52e90. Scope items 5, 6 and 7 are otherwise sound by reading and by the runs below.
+
+1. THE NEW DATA KEY IS RIGHT; ITS TEST DOESN'T SHOW IT. The output draws a new key (create_temp -> create_secret_new, open.rs:321 `crypto::random_dek()`), with the first input's salt and KDF settings raised to the floor for a passphrase (merge.rs:2016-2036), as compaction does. But tests/merge.rs:1247 compares the headers' wrapped keys, and the wrap uses a fresh random nonce each time (open.rs:323-324, crypto.rs:338-344), so the wrapped bytes differ even if the data key were reused. A mutation that reuses an input's key passes. Fix the test: unwrap both with the KEK (as store/header_graft_tests.rs does) and compare the keys.
+
+2. THE SECOND COPY'S PASSPHRASE. Run with the build in my target folder, scratch copies, flags only (no key store touched): `mnemo merge a b -o out --passphrase <a's>` where b was rekeyed fails with "wrong passphrase, or the key material has been tampered with (the secret came from --passphrase)", exit 1, no output left. It doesn't say the second copy is the one that failed or name `--b-passphrase`. And `--b-passphrase` is the only way to give b's passphrase: there is no environment variable and no prompt for it, while the CLI's own warning says a passphrase flag "lands in shell history and process listings". Also by reading (mnemo.rs:3882-3886): when a's secret comes from a flag, b's key-store entry is never looked up. Suggest: the error names the input and the flag; a prompt for b's passphrase at a terminal, or MNEMO_B_PASSPHRASE; look b up in the key store whenever b has no flag. The rest ran as specified: with both flags the merge works in either order and the output opens with the first copy's secret; an existing output is refused with exit 1.
+
+3. A DEAD BRANCH. merge.rs:1242-1250: for a deleted version with no `_mnemo.tombstone_supersedes`, the comment says its written link comes from "an input's copy of the version". Side::written_over(t) needs t in Side.ids, and ids hold only records that survived the delete rule, so for a deleted t it is always None and the code falls to the version linked to it. It was the same before v0210-3b (the old by_id map also left deleted records out), so the by-value rewrite lost nothing here. Either read the link before the delete rule drops the record, or delete the branch and the comment. I found no other place where a summary (ids, marks, over, held) disagrees with the record it stands for.
+
+4. THE NO-HARD-LINK FALLBACK ISN'T ATOMIC. place_new (merge.rs:1724-1746) creates the output and copies into it. A failed copy removes it and a file that appeared meanwhile is left alone, both tested. A crash or power loss mid-copy leaves a partial file at the output's name, and the next run refuses "already exists". Say so in the doc comment and the guide, or have the refusal mention a leftover from an interrupted merge. On the hard-link path a crash leaves at most the temp file, as compaction does.
+
+5. A KEYED MANIFEST WRITTEN IN BOTH COPIES leaves two live manifests and no flag (my probe: both rewrites live, each superseding the base). relink_slots takes Kind::Fact only (merge.rs:1203) and the manifest's rule is "the larger number, never a copy". The manifest isn't keyed by default (seed.json's has no key), so this is rare. Suggest relinking a manifest's key slot like a fact's.
+
+6. DOC NIT. merge_files' doc says each input is held for readers for the whole merge; b is dropped before the rules run (merge.rs:2012). Harmless, since its records are in memory by then.
+
+7. THE v0.20.2 FIXTURES are what they say (a markerless delete, an in-place edit that keeps its stamp, a compacted tombstone), under a throwaway passphrase, with a pinned generator. They have no keyed record, task, essence item, message or turn written by v0.20.2; RB-020.1 needs the keyed ones.
+
+HOLD THE TAG: no. Item 1 is a five-line test change worth doing with the other fixes.
+```
+
 ## 01M7TM3Q6J50CY1S5RAQXSXEK5
 
 - type: episodic
@@ -6455,6 +8416,171 @@ Editor wiring and wake: Cursor
 EVIDENCE: Official Cursor docs (https://docs.cursor.com/) plus Cursor Community Forum / 3P reports where marked; full table in ~/mnemo-reviews/REV-015.md. (a) MCP: project .cursor/mcp.json and user ~/.cursor/mcp.json (key "mcpServers", supports ${env:NAME} and envFile; already wired by mnemo onboard). (b) Hooks: project .cursor/hooks.json and user ~/.cursor/hooks.json (already wired by mnemo onboard). Events: sessionStart (fire-and-forget, supports additional_context), beforeSubmitPrompt (can block/modify), stop, plus tool hooks (also maps Claude Code hook schemas). End-of-turn stop CAN keep agent going by outputting {"followup_message":"..."} (auto-submitted visually as a new turn); stdin includes loop_count and Cursor enforces loop_limit (default 5 consecutive follow-ups). Note Windows unbuffered-stdout quirk on hook scripts. (c) Idle wake: NO confirmed mechanism for a background command exit, socket or local API to wake an idle local Cursor Agent tab (Cloud/Background Agents run remotely). (d) Terminal timeout & background: foreground commands hit an internal threshold of ~25-30s (Cursor forum/3P; exact official SLA unconfirmed), after which Cursor treats them as timed out or backgrounds them; background commands are supported via detaching/polling, but exit does not wake an idle turn. (e) MCP timeout: strict client timeout (-32001 Request timed out, reported ~60s in Cursor forums/3P; exact official value unconfirmed, notably short for MCP elicitation waits). (f) Instructions: .cursor/rules/*.mdc, AGENTS.md (root), plus User/Team dashboard rules. FINDING: Cursor ~25-30s foreground terminal ceiling severely constrains foreground wait durations, and idle tabs cannot be woken externally. RECOMMENDATION: Wake from ladder: foreground mnemo wait --timeout 15s loop (safely >=10s under Cursor ~25-30s ceiling — suitable for active short-burst multi-agent coordination, not overnight idle) plus stop hook followup_message (bounded by loop_limit=5).
 ```
 
+## 01M7YHV4N7TT8YRPKTYVGZVJEZ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T07:58:56Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-016","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-016.1","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/store/shared.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795247987,"by":"planner-a","from":"open","note":"planner-a: checked against live code (SharedMnemo's single writer in store/shared.rs, file-wide indexes): the case against one multi-project file holds, and the rule '1 file = 1 trust boundary; namespaces only organize inside one' fits AGENTS.md's single-file invariant. Placement is the user's (roadmap order): Planner's recommendation is to lock the rule as a decision now, put Multi-Brain Attach (BrainSet, read-only attach first) after smarter memory in decision.roadmap-order, and record namespaces in docs/ideas.md. No v0.20.2 impact.","to":"needs-user"},{"at":1795248121,"by":"planner-a","from":"needs-user","note":"planner-a: the user aligned 2026-11-21. Accepted: decision.brain-boundaries (1 file = 1 trust boundary); attached brains as roadmap step 4b after smarter memory (decision.roadmap-order); namespaces to docs/ideas.md. No task yet; one is added when step 4b starts.","to":"accepted"}],"_mnemo.triage":"planner-a: the user aligned 2026-11-21. Accepted: decision.brain-boundaries (1 file = 1 trust boundary); attached brains as roadmap step 4b after smarter memory (decision.roadmap-order); namespaces to docs/ideas.md. No task yet; one is added when step 4b starts.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Multi-project and multi-goal scaling: keep 1 file = 1 trust boundary; add Multi-Brain Attach (BrainSet) plus optional namespaces inside one file
+
+EVIDENCE: User product-direction discussion (2026-11-20) on whether MNemo should scale from 1 file = 1 project to one monolithic multi-project .mnemo file (like SQLite), grounded in SharedMnemo single-writer locking (mnemo/src/store/shared.rs), file-wide BM25 IDF and IVF+PQ indexes, Page-0 salt keychain lookup (12.3, RB-009.1), R-001.17 (attach_pack), R-006.2 (--personal) and REV-011 (playbook + client vault). Full architecture note at ~/mnemo-reviews/REV-016.md. FINDING: Replacing 1 file = 1 project with a monolithic multi-project file would break cryptographic/sharing boundaries (visibility is a filter, not a security boundary), degrade BM25/vector recall across unrelated repos, create cross-repo write-lock contention and snapshot pinning, push single files past 100K memories faster, and lose zero-config .git discovery. However, users do need cross-repo personal memory, multi-repo initiatives, read-only playbooks, and multi-goal organization inside one personal/monorepo brain. RECOMMENDATION: Lock the rule — files separate trust, sharing, sync and lifecycle boundaries; namespaces organize goals inside one trust boundary — and build two zero-format-bump features without disrupting near-term Steps 0-4: (1) Primary: Multi-Brain Attach (a thin in-memory BrainSet above SharedMnemo): session-side --attach alias:path:ro|rw (never stored inside .mnemo headers), independent keychain keys and locks (deadlock-free), embed-once federated recall with brain-tagged hits packed into one max_bytes budget (BM25 fallback on embedder mismatch), strictly single-brain writes (no cross-file transactions; Stop-hook turns write to primary only), graceful degradation if an attached brain is unavailable, and opt-in mnemo onboard --with-personal (~/.mnemo/personal.mnemo). Slot after Step 4 (smarter memory) or alongside Step 6 (Node.js). (2) Secondary DX: First-class namespaces (_mnemo.namespace / --namespace across remember, recall, essence, task, finding, inspect) strictly for organizing goals/areas inside one owner brain (monorepos, embedded/mobile apps); track in docs/ideas.md or Step 4. Roadmap placement remains the user decision.
+```
+
+## 01M82VP8RGZGHWTDTBP1AAM6XV
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T00:08:00Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-017","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"REV-017.1","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["mnemo/src/store/merge.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795392684,"by":"planner-a","from":"open","note":"Checked in the v0210-2 working tree: key flags come from the pairwise live_of and only order.last() is cleared (merge.rs ~1214-1246); key_of takes min over hlc_prev, which set_hlc_prev truncates to the 8 largest (records.rs 1944); merge_files places the output with hard_link (merge.rs 1717). (A) and (B) go into v0210-2 round 4 under decision.v0210-chain-rule (flags from the write-made links; a first-written stamp that survives truncation, preferring an existing field over a new key). (C) goes to v0210-3b.","to":"accepted"}],"_mnemo.triage":"Checked in the v0210-2 working tree: key flags come from the pairwise live_of and only order.last() is cleared (merge.rs ~1214-1246); key_of takes min over hlc_prev, which set_hlc_prev truncates to the 8 largest (records.rs 1944); merge_files places the output with hard_link (merge.rs 1717). (A) and (B) go into v0210-2 round 4 under decision.v0210-chain-rule (flags from the write-made links; a first-written stamp that survives truncation, preferring an existing field over a new key). (C) goes to v0210-3b.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+merge.rs (v0210-2 working tree): two live associativity bugs in relink_slots (lines 1211-1246, 1123-1129) plus hard_link failure on exFAT/FAT32 (line 1717)
+
+EVIDENCE: Live code audit of branch v0210-2 (8524c3f + uncommitted working tree) in mnemo/src/store/merge.rs and mnemo/src/store/records.rs; full write-up at ~/mnemo-reviews/REV-017.md. FINDING: Three live correctness bugs remain in uncommitted merge.rs: (A) Pairwise key-conflict flagging in relink_slots (merge.rs:1211-1246) breaks associativity in two ways — it sets _mnemo.merge_conflict from pairwise live_of(&sides[0],&sides[1]) and only clears flags on order.last() (line 1224). Counterexample 1 (3 copies): base V0, a writes A="X" (t=10), b writes B="X" (t=20), c writes C="Y" (t=30) -> (a+b)+c flags only B (since same_visible(A,B) was true), while a+(b+c) compares A vs C and flags BOTH A and B. Counterexample 2 (copy-of-a-copy): a writes A="X", c writes C="Y", d (from a) writes D="Z" over A -> (a+c)+d leaves A flagged (not order.last()), while a+(c+d) never flags A. (B) relink_slots:1123-1129 computes first-written stamp via min(hlc_prev), but set_hlc_prev (records.rs:1944-1950) keeps the HLC_PREV_KEEP (8) LARGEST stamps, evicting the earliest stamp after >8 edits/relinks and shifting slot ordering across merges. (C) merge_files (merge.rs:1717) places output via std::fs::hard_link(&tmp, out), which fails with EPERM/ENOTSUP on exFAT/FAT32 (USB drives) and some FUSE/container mounts even when out does not exist. RECOMMENDATION (user endorsed Option 1 on 2026-11-22): (1) Compute keyed conflict flags purely from the write-made DAG (written_over): find maximal live nodes (no live descendant written over them); if >=2 maximal nodes differ in visible content, flag non-tail maximal nodes and clear _mnemo.merge_conflict on all non-maximal nodes and tail (associative by construction); (2) Store immutable _mnemo.first_hlc once on creation instead of inferring from max-truncated hlc_prev; (3) Handle hard_link Unsupported/EPERM cleanly on non-hardlink filesystems. Hold v0.21.0 tag? Yes for (1) and (2).
+```
+
+## 01M82VQ4FTHTKNXTQDQCVXPHF9
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T00:08:28Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-017","_mnemo.category":"PERF","_mnemo.finding_id":"REV-017.2","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["mnemo/src/store/merge.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795392684,"by":"planner-a","from":"open","note":"Checked: wins() builds hash and bytes before comparing numbers (merge.rs 163), kept_keys scans other.by_id per tombstone (836-854), records are cloned into kept, by_id and out. (1)-(3) go to v0210-3b, before the v0210-4 benchmark, which measures the RAM figure (the 1.5-2.5 GB is an estimate). (4) the tombstone vector is a format change: with the vectorless rows of decision.turn-markers-fold, roadmap step 4.","to":"accepted"}],"_mnemo.triage":"Checked: wins() builds hash and bytes before comparing numbers (merge.rs 163), kept_keys scans other.by_id per tombstone (836-854), records are cloned into kept, by_id and out. (1)-(3) go to v0210-3b, before the v0210-4 benchmark, which measures the RAM figure (the 1.5-2.5 GB is an estimate). (4) the tombstone vector is a format change: with the vectorless rows of decision.turn-markers-fold, roadmap step 4.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+merge.rs: 4x full clones (~1.5-2.5 GB RAM at 100Kx2), eager hash/serialize in wins/name_final_versions, two O(T*N)/O(G^2) loops, and 1.1 KB tombstones
+
+EVIDENCE: Live code audit of mnemo/src/store/merge.rs and mnemo/src/store/records.rs ahead of v0210-4 two-100K-record benchmark; full write-up at ~/mnemo-reviews/REV-017.md. FINDING: Four major performance/memory bottlenecks sit in current merge.rs: (1) 4x full clones of both brains held simultaneously in RAM — merge_files loads both inputs (merge.rs:1655-1656), then merge_core clones every surviving record three more times into kept (line 749), sides[i].by_id (line 820) and out (lines 900, 910, 922) (~1.5-2.5 GB peak RAM for two 100K-record brains with 384-dim Vec<f32> vectors). (2) Eager quantize + MessagePack + SHA-256 on every overlapping record — wins(a,b) (lines 163-165) eagerly builds (number, content_hash, core_bytes) before comparing number; resolve (line 485) repeats record_bytes; name_final_versions (lines 1455-1492) hashes core_bytes on all 100K+ output records even when untouched (~5x-10x wasted CPU). (3) Two quadratic loops — kept_keys (lines 836-854) scans all of other.by_id.values() per tombstone (O(T*N) = 100M iterations at 1K tombstones x 100K records), and gone_after inside continues/ended (lines 1077-1120) scans all of gone_over inside BFS per member (O(S*G^2)). (4) Tombstones cost ~1.1 KB each because records.rs:1748 stages a full 772 B fp16 vector (819.2 B on disk) for every tombstone sentinel vector. RECOMMENDATION: (1) Move records by value (into_iter()) through inputs -> kept -> sides -> out and keep only compact metadata summaries where sides lookup is needed (~65-75% peak RAM reduction); (2) Short-circuit wins() on number first via .cmp().then_with(...) and track touched IDs so name_final_versions only hashes modified records; (3) Pre-index keyed facts by (owner, key) for kept_keys (O(N+T)) and gone_children: BTreeMap<u128, Vec<u128>> in relink_slots (O(1) lookup); (4) Include tombstones in REV-014.1 v10 vectorless-rows roadmap (~5.5x smaller tombstones). Hold v0.21.0 tag? Recommend (2) and (3) before v0210-4 100K bench; (1) before or right after.
+```
+
+## 01M82VSH304E99ZEYYC9KPDGT7
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T00:09:46Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-017","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"REV-017.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/store/merge.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795392684,"by":"planner-a","from":"open","note":"(1) is decision.v0210-chain-rule, the user's choice for round 4: write-made links only, and no merge keys beyond it unless the report says why. (2) dropping hlc_prev, merge_heads and VER_MERGED goes to the user as an option only if round 4 blocks (no fifth round). (3) an operation log for roadmap step 3 (change sets) is a design input when step 3 starts.","to":"accepted"}],"_mnemo.triage":"(1) is decision.v0210-chain-rule, the user's choice for round 4: write-made links only, and no merge keys beyond it unless the report says why. (2) dropping hlc_prev, merge_heads and VER_MERGED goes to the user as an option only if round 4 blocks (no fifth round). (3) an operation log for roadmap step 3 (change sets) is a design input when step 3 starts.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge architecture direction: finish v0.21.0 with Option 1 (user-endorsed), Option 2 fallback, and op-based Step 3 sync
+
+EVIDENCE: Four blocked rounds on v0210-2 (mnemo/src/store/merge.rs now 1,744 LOC with 11 reserved merge metadata keys) driven by proving strict byte-for-byte semilattice equality on mutable in-place state plus top-8 truncated ancestry (HLC_PREV_KEEP=8). Full evaluation at ~/mnemo-reviews/REV-017.md. User endorsed Option 1 on 2026-11-22. FINDING: Bolting additional merge-bookkeeping metadata keys onto in-place state reconstruction creates recurring 3- and 4-copy associativity regressions whenever derived fields feed back into subsequent merges. RECOMMENDATION: (1) Option 1 (user-endorsed for v0.21.0): finish round 4 using pure write-DAG rules (decision.v0210-chain-rule plus REV-017.1 DAG-derived key conflict flags and immutable first_hlc, plus REV-017.2 perf fixes) and stop adding further merge metadata keys; (2) Option 2 (fallback only if round 4 still blocks on same-ULID ancestry): drop _mnemo.hlc_prev, _mnemo.merge_heads and VER_MERGED (~400-500 LOC) and treat rare same-ULID update() edits as conservative LWW plus deterministic conflict copy (aligned with Engineering Rule 2 where keyed writes create new ULIDs); (3) Option 3 (Roadmap Step 3 change sets): design docs/design/sync.md Step 3 around immutable operation-log replay in deterministic (hlc, replica_id, seq) order so multi-device sync is associative by construction rather than re-running state-reconstruction merges. Hold v0.21.0 tag? No (planning guidance for round 4 and Step 3).
+```
+
+## 01M83B0V3PS201D5A0X20G2BDD
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T04:35:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-018","_mnemo.category":"PERF","_mnemo.finding_id":"REV-018.1","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/mcp.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"deferred","_mnemo.status_history":[{"at":1795408708,"by":"planner-a","from":"open","note":"Measured on the installed 0.20.2: tools/list sends 24 tools, 28,994 bytes of JSON (about 7K tokens); about, recall, remember, get, essence, forget, update and history are 13,717 bytes, and task, inbox, claim and finding add 6,573. Clients without deferred tool loading (Cursor, Codex, Windsurf, local models) pay it every turn. Trigger: the roadmap step 2 spec (more editors in onboard), where the Planner will propose --tools core|team|all with onboard choosing team when a session has a role. The guide's card and the hooks' brief must only name tools the profile exposes.","to":"deferred"}],"_mnemo.triage":"Measured on the installed 0.20.2: tools/list sends 24 tools, 28,994 bytes of JSON (about 7K tokens); about, recall, remember, get, essence, forget, update and history are 13,717 bytes, and task, inbox, claim and finding add 6,573. Clients without deferred tool loading (Cursor, Codex, Windsurf, local models) pay it every turn. Trigger: the roadmap step 2 spec (more editors in onboard), where the Planner will propose --tools core|team|all with onboard choosing team when a session has a role. The guide's card and the hooks' brief must only name tools the profile exposes.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+MCP tool schema bloat: expose lean tool profiles (--tools core|team|all) on mnemo serve --mcp
+
+EVIDENCE: Live audit of mnemo/src/mcp.rs (lines 1275-1697) shows mnemo serve --mcp exposes all 24 tools (~39,238 bytes of schema source in tools_list(), ~5,000-6,500 tokens per turn) unconditionally, including 5 cache_* tools and 4 multi-agent coordination tools (task, inbox, claim, finding) even for solo coding users. Online developer discussions (r/ClaudeCode, r/mcp; full report ~/mnemo-reviews/REV-018.md) cite MCP schema token bloat (20K-60K tokens across connected servers) as a primary reason devs uninstall MCP memory tools, especially in Cursor, Codex, VS Code, Windsurf and local models without Tool Search. FINDING: Solo coding sessions pay a large per-turn token tax for unused coordination and result-cache schemas. RECOMMENDATION: Add --tools core|team|all to mnemo serve --mcp (core: 6-7 tools about/recall/remember/get/essence/forget/update; team: adds task/inbox/claim/finding; all: full 24-tool surface). Have mnemo onboard write --tools core by default and --tools team when --wake or multi-agent coordination is enabled. Zero on-disk format change; high-leverage DX quick win ahead of or alongside Step 2 (more editors in onboard). Hold v0.21.0 tag? No.
+```
+
+## 01M83B1HPGG36MGFVG4SX6E8CZ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T04:36:18Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-018","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"REV-018.2","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["docs/ideas.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"deferred","_mnemo.status_history":[{"at":1795408708,"by":"planner-a","from":"open","note":"Planning input for roadmap step 4 (smarter memory). Trigger: the step 4 spec, alongside decision.turn-markers-fold and status.backlog-small (15)-(18). File anchors for staleness, rejected alternatives kept with decisions, expiry, and snapshot diff/undo all fit the engine's supersede-don't-erase rule; the tracked-secrets doctor check is small and could go earlier if the user wants.","to":"deferred"}],"_mnemo.triage":"Planning input for roadmap step 4 (smarter memory). Trigger: the step 4 spec, alongside decision.turn-markers-fold and status.backlog-small (15)-(18). File anchors for staleness, rejected alternatives kept with decisions, expiry, and snapshot diff/undo all fit the engine's supersede-don't-erase rule; the tracked-secrets doctor check is small and could go earlier if the user wants.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Step 4 (Smarter Memory) sharpenings from online harness friction: git-anchored staleness, structured handoffs with rejected paths, and memory expiry/undo
+
+EVIDENCE: 2025-2026 practitioner research across Reddit (r/ClaudeCode, r/ClaudeAI, r/cursor, r/AI_Agents), Hacker News and harness write-ups (full report ~/mnemo-reviews/REV-018.md). Power users are actively disabling native auto-memory (CLAUDE_CODE_DISABLE_AUTO_MEMORY=1) due to three failure modes: (1) Compaction Black Hole losing rejected approaches ("why not X"), causing agents to re-propose dead ends; (2) Over-generalization (one-off session remarks saved as permanent global rules) and stale notes making agents "wrong with conviction"; (3) No clean way to audit or roll back bad memories. FINDING: MNemo already has keyed superseding, stale, hooks, redact.rs and PITR snapshots, so targeted Step 4 additions can solve the exact reasons developers reject native auto-memory. RECOMMENDATION: Fold three capabilities into Step 4 (Smarter Memory): (1) optional --ref <path> file anchors on memories so mnemo stale and mnemo doctor flag memories whose referenced files changed or vanished in git (plus optional path-boosted recall); (2) structured pre-compact / session-close handoff capture separating durable decisions + rejected alternatives (keyed decision.*), active shift-change state (replacing manual HANDOVER.md), and temporary notes with optional --expires <duration>; (3) user-facing snapshot diff/undo CLI UX and mnemo doctor security hygiene checks (warning when plain-text .claude/settings.local.json or MEMORY.md is tracked in git). Hold v0.21.0 tag? No (Step 4 planning input).
+```
+
+## 01M83B30JSWTMX5AKVP6XV9ENM
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T04:37:06Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-018","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-018.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["docs/ideas.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"deferred","_mnemo.status_history":[{"at":1795408708,"by":"planner-a","from":"open","note":"Trigger: the roadmap step 2 spec. (1) mnemo import has only a JSONL form today; an import from a Claude Code memory folder or markdown notes belongs with more editors in onboard. (2) The two contrasts (static rules in AGENTS.md vs live encrypted memory; encrypted and redacted vs plain-text config) go into the SEO guide-page drafts for the user's approval. (3) The non-goals (worktree and port managers, permission engines, agent runtimes) go into the step 2 spec as out of scope, with REV-012.4.","to":"deferred"}],"_mnemo.triage":"Trigger: the roadmap step 2 spec. (1) mnemo import has only a JSONL form today; an import from a Claude Code memory folder or markdown notes belongs with more editors in onboard. (2) The two contrasts (static rules in AGENTS.md vs live encrypted memory; encrypted and redacted vs plain-text config) go into the SEO guide-page drafts for the user's approval. (3) The non-goals (worktree and port managers, permission engines, agent runtimes) go into the step 2 spec as out of scope, with REV-012.4.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Step 2 (More editors in onboard) wedge: AGENTS.md encrypted companion positioning, mnemo import from MEMORY.md/markdown, and explicit harness non-goals
+
+EVIDENCE: 2025-2026 Reddit/HN synthesis (full report ~/mnemo-reviews/REV-018.md) shows hybrid multi-harness workflows (Claude Code + Cursor/Codex/Windsurf/Antigravity) are now mainstream, while native auto-memory remains siloed per vendor and Apiiro/Reddit audits highlighted thousands of secret leaks from plain-text .claude/settings.local.json and markdown memory folders. FINDING: Developers already standardize static repo rules in AGENTS.md and are searching for a portable, encrypted dynamic memory layer underneath it; friction migrating existing MEMORY.md/CLAUDE.md junk drawers is an easy adoption barrier to remove. RECOMMENDATION: (1) Pair Step 2 (more editors in onboard) with mnemo import --from claude-memory|markdown so frustrated users migrate existing ~/.claude/projects/.../memory/ or .notes/ into .git/mnemo/project.mnemo in one command; (2) Sharpen product messaging around two contrasts: static rules in AGENTS.md vs live encrypted decisions/handoffs in MNemo across every editor, and encrypted + redacted + never-in-git-history vs plain-text config leaks (with Step 4b --attach separating global personal preferences from repo facts); (3) Explicitly keep worktree .env/port managers, general permission-bypass engines, and full agent runtimes off the roadmap to protect surface-area discipline (REV-012.4). Hold v0.21.0 tag? No.
+```
+
+## 01M84YY8RDNBZ1TKEN49EQHHK9
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:43:16Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-019","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-019.1","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["mnemo/src/bin/mnemo.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795463222,"by":"planner-a","from":"open","note":"Checked at 8b52e90: put strips _mnemo.merge_heads and merge_status_conflict on a stamped write but not _mnemo.merge_conflict (records.rs ~1688); the CLI has no forget command (MCP only); the table prints counts only. v0.21.0, in v0210-5g: a user's write to a flagged record clears its flag at once (Automerge's rule), and a new write of a key settles its flagged earlier versions (the Worker picks how, with a test); mnemo forget <id> in the CLI, since the guide's way to settle is to forget a copy; the table lists up to 10 conflicted ids or keys; the guide's after-a-merge paragraph (with RB-020.3 item 3). v0.21.2 (spec.v0212-inspect): conflict badges and winner/copy pairing on every inspect tab, conflict copies marked in recall, mnemo conflicts.","to":"accepted"}],"_mnemo.triage":"Checked at 8b52e90: put strips _mnemo.merge_heads and merge_status_conflict on a stamped write but not _mnemo.merge_conflict (records.rs ~1688); the CLI has no forget command (MCP only); the table prints counts only. v0.21.0, in v0210-5g: a user's write to a flagged record clears its flag at once (Automerge's rule), and a new write of a key settles its flagged earlier versions (the Worker picks how, with a test); mnemo forget <id> in the CLI, since the guide's way to settle is to forget a copy; the table lists up to 10 conflicted ids or keys; the guide's after-a-merge paragraph (with RB-020.3 item 3). v0.21.2 (spec.v0212-inspect): conflict badges and winner/copy pairing on every inspect tab, conflict copies marked in recall, mnemo conflicts.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge conflict resolution dead end: flags never clear on edit, CLI has no forget <id>, recall returns duplicate conflict copies, and inspect hides conflicts outside Memories tab
+
+EVIDENCE: Product walkthrough of the 3 real conflicts in report.v0210-4 against release-0.21.0 (8b52e90 / 23f9452): mnemo/src/bin/mnemo.rs, mnemo/src/bin/mnemo/inspect.rs, inspect.html, mnemo/src/store/records.rs:1688-1703, and mnemo/guide/guide.md:297-318. Full report at ~/mnemo-reviews/REV-019.md. FINDING: v0.21.0 detects merge conflicts cleanly but leaves users with no complete path to act on or clear them: (1) Editing a flagged essence item, task or finding removes _mnemo.merge_heads but never removes _mnemo.merge_conflict, so about and inspect keep reporting the conflict until a future merge or deletion; (2) An unkeyed fact conflict copy stays live in recall as an indistinguishable duplicate alongside its winner (polluting agent recall), and the CLI has no mnemo forget <id> command (only thread forget / cache delete), so shell users cannot even delete it; (3) Keyed conflicts stamp the superseded historical version, which writing a new key version never clears; (4) CLI table output prints counts only (no IDs/keys; --format json cannot re-run against existing -o), there is no mnemo conflicts or list --conflicts command, and mnemo inspect shows conflict tags only on the Memories tab (missing on Keys, Tasks and Findings) with _mnemo.merge_source buried in collapsed JSON. RECOMMENDATION: For v0.21.0 (small, aligns with v0210-5f / RB-020.3): clear _mnemo.merge_conflict on user edit/update, print up to ~10 conflicted IDs/keys in the CLI merge table report, and add a short After-a-merge-with-conflicts paragraph to guide.md. For v0.21.1 / v0.21.2: add CLI mnemo forget <id>, mnemo conflicts [list|resolve], mark/dedupe conflict copies in recall, and badge/pair conflicts on inspect Keys/Tasks/Findings tabs. Hold v0.21.0 tag? No hard hold for full resolver UI, yes to clearing _mnemo.merge_conflict on edit (with RB-020.3), printing conflict IDs, and documenting next steps in guide.md.
+```
+
+## 01M84YZ29DZ21VNCY5WVZNNX3T
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:43:42Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-019","_mnemo.category":"DX/DOCS","_mnemo.finding_id":"REV-019.2","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/guide/guide.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795463222,"by":"planner-a","from":"open","note":"Checked: the NeedsWriteOpen refusal names mnemo index (merge.rs ~1949), which rebuilds the index. All five in v0210-5g: a safe recovery hint, the reembed hint on embedders differ, the separate-brains explanation, the 'still hold' note only when something was removed and the claims/presence count explained, and the guide's tangled line plus how to put the merged file back in place.","to":"accepted"}],"_mnemo.triage":"Checked: the NeedsWriteOpen refusal names mnemo index (merge.rs ~1949), which rebuilds the index. All five in v0210-5g: a safe recovery hint, the reembed hint on embedders differ, the separate-brains explanation, the 'still hold' note only when something was removed and the claims/presence count explained, and the guide's tangled line plus how to put the merged file back in place.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Merge CLI report, refusals and guide wording: misleading mnemo index recovery hint, unactionable refusals, unconditional removed note, and missing next-steps in guide.md
+
+EVIDENCE: Wording review of release-0.21.0 user-facing strings in mnemo/src/store/merge.rs:1929-2010, mnemo/src/bin/mnemo.rs:2573-2693, mnemo/guide/guide.md:297-318, and mnemo/README.md:670-718,1078; full report at ~/mnemo-reviews/REV-019.md. FINDING: Overall tone is plain and honest, but five concrete UX wording rough edges remain: (1) merge.rs:1947-1953 NeedsWriteOpen refusal tells users to run mnemo index <file> to recover a pending WAL/torn header -- running index builds/rebuilds the ANN index instead of a lightweight recovery open; (2) merge.rs:1986-1990 embedders-differ refusal omits the exact fix (run mnemo reembed on one copy, then merge again); (3) merge.rs:2002-2009 not-one-brain refusal prints raw salts/manifest ULIDs without explaining that merge combines diverged copies of one brain, not two separate brains; (4) mnemo.rs:2628-2693 prints note: a and b still hold the records the merge removed even when removed == 0, uses internal jargon on line 2652 (left out, as compaction leaves them out), and in report.v0210-4 merged (35,077) vs a_only+b_only+both (35,174) vs about (35,175) do not reconcile visually because local claims/presence are omitted without saying so; (5) guide.md:315 phrasing (give a copy rekeyed since its own) is tangled, and guide.md omits how to put merged.mnemo back into .git/mnemo/project.mnemo or resolve flagged conflicts. RECOMMENDATION: Replace mnemo index hint with safe recovery guidance, add reembed and separate-brain hints to refusals, gate the still-hold note on !r.removed.is_empty(), clarify skipped/count lines, and tighten guide.md Merge two copies with swap-in and conflict next steps. Hold v0.21.0 tag? No hard hold; small string/doc fixes fit cleanly into v0210-5f / release handoff.
+```
+
+## 01M84Z006NS5G60J0GMAMHGN1X
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:44:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-019","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-019.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["docs/design/sync.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"deferred","_mnemo.status_history":[{"at":1795463222,"by":"planner-a","from":"open","note":"(3) immediate clear is in v0.21.0 through REV-019.1. Trigger for the rest: the v0.21.2 spec (spec.v0212-inspect now lists the conflict checklist and side-by-side pairing with a readable origin) and the step 3 design (a restore point before an in-place pull, change-set summaries by origin).","to":"deferred"}],"_mnemo.triage":"(3) immediate clear is in v0.21.0 through REV-019.1. Trigger for the rest: the v0.21.2 spec (spec.v0212-inspect now lists the conflict checklist and side-by-side pairing with a readable origin) and the step 3 design (a restore point before an in-place pull, change-set summaries by origin).","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Prior-art merge UX benchmark (Git, Obsidian Sync, Apple Notes, Automerge): borrow checklist, side-by-side origin pairing, and immediate multi-value clear
+
+EVIDENCE: Product comparison across Git, Obsidian Sync (+ Conflict Resolver plugins), Apple Notes (CloudKit), and Automerge / Ink and Switch Patchwork (full matrix at ~/mnemo-reviews/REV-019.md). FINDING: MNemo already makes the right high-level call by adopting non-blocking convergence (like Automerge/Obsidian) instead of Git blocking conflict markers or Apple Notes silent black-box overwrites, so agent sessions stay usable right away. The gap is the missing post-merge review and settlement UX that makes non-blocking tools trustworthy. RECOMMENDATION: Borrow four specific patterns for v0.21.1 / v0.21.2 and Step 3: (1) From Git: a single CLI unresolved-conflict checklist (mnemo conflicts) with explicit per-item resolve commands; (2) From Obsidian Sync: side-by-side winner vs conflict-copy pairing in inspect and CLI with human-readable origin (copy name or device label + timestamp) rather than raw ULIDs in collapsed JSON; (3) From Automerge multi-value registers: any user resolution write clears the conflict badge immediately instead of waiting for a later merge, plus Ink and Switch Edit-Group summaries grouped by origin once Step 3 change sets arrive; (4) From Apple Notes / Time Machine: automatically create a PITR restore point before applying an in-place sync pull so rollback is always one command away. Skip character-level text CRDT interleaving and blocking merge states. Hold v0.21.0 tag? No.
+```
+
+## 01M84Z0Q6MXT1V6CPFYQ8EM8PW
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-23T19:44:37Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-019","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"REV-019.4","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["docs/design/sync.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"deferred","_mnemo.status_history":[{"at":1795463222,"by":"planner-a","from":"open","note":"(3) done: planner-a updated docs/design/sync.md section 7 to the shipped rules (ID-level deletes, the chain rule, task status, settling), handed off in handoff-sync-md. (1), (2) and (4) are inputs to the step 3 design: incremental in-place apply, an operation log with (replica, sequence, stamp), REV-019.1's settlement as a prerequisite for the paid sync, an encrypted device label.","to":"deferred"}],"_mnemo.triage":"(3) done: planner-a updated docs/design/sync.md section 7 to the shipped rules (ID-level deletes, the chain rule, task status, settling), handed off in handoff-sync-md. (1), (2) and (4) are inputs to the step 3 design: incremental in-place apply, an operation log with (replica, sequence, stamp), REV-019.1's settlement as a prerequisite for the paid sync, an encrypted device label.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Sync roadmap fit (docs/design/sync.md, change sets, Pro/Teams, REV-017.3): four alignment gaps to close before Step 3
+
+EVIDENCE: Comparison of v0.21.0 merge (release-0.21.0, report.v0210-4) against docs/design/sync.md and REV-017.3 (full analysis at ~/mnemo-reviews/REV-019.md). FINDING: v0.21.0 validates the free local wedge cleanly (HLC, tombstones, manifest-id rekey identity, embedder checks, local-only exclusions, zero-trust client-side rules). Four gaps need alignment before Step 3 (change sets) and Pro sync: (1) Whole-file rewrite vs incremental apply: merge_files loads both full brains (~985 MB RSS at 100K) and writes a fresh 1-snapshot file; Step 3 sync import and Pro background sync over SharedMnemo need incremental in-place apply that preserves local PITR snapshots; (2) State reconstruction vs REV-017.3 op-log replay: v0.21.0 infers ancestry across snapshots using 8+ _mnemo.merge_* keys and HLC_PREV_KEEP=8; Step 3 change-set envelopes should carry explicit causal operations (put, supersede, update, delete, task_transition) with (replica_id, seq, hlc) so incremental sync is associative by construction while mnemo merge stays the offline whole-file fallback; (3) Spec drift in docs/design/sync.md section 7 (lines 145-146), which still states newest action wins for keyed deletes instead of v0.21.0 ID-level delete wins; (4) Conflict lifecycle and device labels in Pro: un-clearable conflict flags and recall-polluting conflict copies (REV-019.1) would accumulate monotonically under continuous background sync -- solving REV-019.1 plus adding an optional encrypted device label on _mnemo.sync replicas is a prerequisite for Pro. RECOMMENDATION: Update sync.md section 7 now, treat REV-019.1 conflict settlement as a prerequisite before Pro sync, and design Step 3 change sets around incremental op-log replay with optional encrypted replica labels. Hold v0.21.0 tag? No.
+```
+
 ## 01M7PEZYWFKE4Y6NHMM8XZSN57
 
 - type: semantic
@@ -6488,10 +8614,36 @@ Every task starts with a recall; its report says found, partial, not stored or n
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","status.v0.18.1"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795229110}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","status.v0.18.1"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795277386}`
 
 ```text
-v0.20.1 released 2026-11-20 (mnemo wait: idle wake checked in Claude Code and Antigravity, ~1 s; MCP results without vectors). Registries, site and the MCP registry show 0.20.1. v0.20.0 before it (catch-up, the fsync merge, RB-016, RB-018).
+v0.20.2 released 2026-11-21. Now v0.21.0, mnemo merge: step 1 done (7f822d4); spec.v0210 rev 2 after RB-019 (id-level deletes, rekeyed copies merge; decision.v0210-merge-rules); next v0210-1b, then v0210-2.
+```
+
+## 01M7ZW0SRY09RBX1FWX0CHGN3Z
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-21T20:16:01Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.site-publish"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1795292161,"status":"open"}]}`
+
+```text
+SEO step 1 live 2026-11-21: Pages publishes through GitHub Actions (site-1, site-2); the user verified Google Search Console for https://toarchkumar.github.io/mnemo/ and submitted sitemap.xml. Next for SEO: guide pages and catalog listings, drafted for the user's approval.
+```
+
+## 01M83QDT2HAF45NQXPVPGD4N5P
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-23T08:12:42Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1795421562,"status":"open"}]}`
+
+```text
+2026-11-23: v0210-2 done (PR #176, 5a62405 on release-0.21.0, round 4 under decision.v0210-chain-rule). Next v0210-3 (CLI surfaces, after the two hand-offs), v0210-3b (REV-017 speed and memory), v0210-4 dogfood, v0210-5 READY with RB-020 and REVIEWER-A product.
 ```
 
 ## 01M7PEZZ06ZB9C0VRTDF2P6PE5
@@ -6514,10 +8666,49 @@ Carried: the shared_lock and EmbedQueueTests timing flakes (logged, change only 
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["spec.perf-2","spec.inspect-date-filter"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795229110}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["spec.perf-2","spec.inspect-date-filter"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795248598}`
 
 ```text
-v0.20.2 'use what we built' (spec.v0202, v0202-1 to -5): get --key, MCP get, a render that drops nothing, recall --thread, supersede, CLI stats; pointer and claims trials (status.pointer-trial). Then decision.roadmap-order: merge, editors, change sets.
+Next (decision.roadmap-order): (1) mnemo merge; (2) more editors in onboard, Antigravity's allow-rule check first (decision.onboard-allow-rules); (3) change sets; (4) smarter memory, status.backlog-small (15)-(18); (4b) attached brains. A start needs the user's go.
+```
+
+## 01M7ZDEN6Q2Z5BRG8BCTBPB92W
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-21T16:01:27Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.plugin-directory"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1795276887,"status":"open"}],"_mnemo.updated_at":1795329780}`
+
+```text
+After v0.21.0: v0.21.1 plugin listings (decision.plugin-directory) and mnemo backup (decision.brain-backup); v0.21.2 inspect on brand (spec.v0212-inspect); then repo cleanup, then roadmap step 2. Each start needs the user's go.
+```
+
+## 01M7ZN9DQ5PET0YXP0ACZED9EV
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-21T18:18:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.site-publish","site-1"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1795285104,"status":"open"}]}`
+
+```text
+Site (decision.site-publish): site-1 after v0210-1b, then v0210-2. The user switches Pages to GitHub Actions at site-1's WAITING, and sets up Google Search Console. Guide pages and catalog listings come later, drafted for the user's approval.
+```
+
+## 01M7YZFDNEGTP8BNX33DPB9GAV
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-21T11:57:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["v0210-1"],"_mnemo.section":"open","_mnemo.status":"resolved","_mnemo.status_history":[{"at":1795262232,"status":"open"},{"at":1795277386,"status":"resolved"}],"_mnemo.updated_at":1795277386}`
+
+```text
+Tombstones (v0.21.0) are kept forever, about 1.1 KB each, and message prunes write them too. After merge ships: decide a tombstone horizon (drop old ones at compaction; a merge refuses copies diverged longer than that).
 ```
 
 ## 01M7PEZYTHY4K8FJG46J6CTCVF
@@ -7216,7 +9407,7 @@ Research inputs folded into Phase 7: WikiSkill (persistent knowledge layer) and 
 - scope: private
 - created: 2026-10-24T02:39:13Z
 - importance: 1
-- metadata: `{"_mnemo.default_agent":"cursor-agent","_mnemo.updated_at":1794860376,"agent_id_default":"cursor-agent","area":"onboarding","conventions":{"area_values":["onboarding","performance","decision","product","architecture"],"perf_keys":["version","metric","value","units","build","corpus"]},"embedder":{"dimensions":384,"name":"Snowflake/snowflake-arctic-embed-xs@d8c86521100d3556476a063fc2342036d45c106f","normalize":true,"query_convention":"arctic-query-prefix"},"project":{"dogfood_helper":"test/scripts/project_memory.py","engine_docs":"mnemo/README.md","name":"Memory Nemo (MNemo)","repo":"https://github.com/toarchkumar/mnemo"},"topic":"manifest"}`
+- metadata: `{"_mnemo.default_agent":"cursor-agent","_mnemo.first_hlc":1792809553479,"_mnemo.hlc":1795534525217,"_mnemo.hlc_prev":[[1794860376000,2122653291616725000]],"_mnemo.hlc_since":1795534525195,"_mnemo.updated_at":1794860376,"_mnemo.ver":2562380343473716871,"agent_id_default":"cursor-agent","area":"onboarding","conventions":{"area_values":["onboarding","performance","decision","product","architecture"],"perf_keys":["version","metric","value","units","build","corpus"]},"embedder":{"dimensions":384,"name":"Snowflake/snowflake-arctic-embed-xs@d8c86521100d3556476a063fc2342036d45c106f","normalize":true,"query_convention":"arctic-query-prefix"},"project":{"dogfood_helper":"test/scripts/project_memory.py","engine_docs":"mnemo/README.md","name":"Memory Nemo (MNemo)","repo":"https://github.com/toarchkumar/mnemo"},"topic":"manifest"}`
 
 ```text
 MNEMO MANIFEST — This .mnemo file is the project memory (the project brain) for Memory Nemo (MNemo), an encrypted single-file Rust agent-memory engine. Since the v0.16 dogfood switch (2026-11-15) it's .git/mnemo/project.mnemo, and its generated key is in the user's keychain. Embedder: the engine's built-in snowflake-arctic-embed-xs at a pinned revision (384-dim, normalised, with its query prefix; since v0.15), all-MiniLM-L6-v2 before. Facts belong to agent_id cursor-agent, the brain's default agent (`mnemo default-agent`, since v0.17): a write that names no agent goes to it, so a keyed write supersedes in the same slot. Metadata convention: area in {onboarding, performance, decision, ...} with a topic key. Self-describing: `mnemo about` (no path in this repo) shows every area=onboarding memory, most important first; that briefing is the source of truth for how to use this file. Dogfood helper: test/scripts/project_memory.py. Engine docs: mnemo/README.md.
