@@ -70,6 +70,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Rekey { path, .. }
         | Command::Info { path, .. }
         | Command::Verify { path, .. }
+        | Command::Backup { path, .. }
         | Command::Remember { path, .. }
         | Command::About { path, .. }
         | Command::List { path, .. }
@@ -144,6 +145,16 @@ fn shift_get_args(cmd: &mut Command) -> std::result::Result<(), String> {
     {
         if id.is_some() || parse_ulid(path).is_ok() {
             return Err("`get` takes a memory's id or `--key`, not both".into());
+        }
+        return Ok(());
+    }
+    // v0.21.1: `backup <DIR>` is `backup <project brain> <DIR>`.
+    if let Command::Backup { path, to, .. } = cmd {
+        if to.is_none() {
+            if path.is_empty() {
+                return Err("`backup` needs a directory: `mnemo backup [PATH] <DIR>`".into());
+            }
+            *to = Some(std::mem::take(path));
         }
         return Ok(());
     }
@@ -417,6 +428,46 @@ enum Command {
         /// copy alone held, the ones flagged and the ones removed.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
+    },
+    /// Copy the brain, still encrypted, to `<DIR>/mnemo-YYYY-MM-DD.mnemo`
+    /// (today's local date), check the copy, and keep the newest `--keep`.
+    ///
+    /// The copy is taken under the brain's shared lock (12.4): sessions
+    /// reading it carry on, and a write waits for the copy (up to `--wait`).
+    /// It goes to a temp file in DIR, is synced and checked as `verify` does
+    /// (every record decrypts and decodes), then renamed into place, so a
+    /// second backup the same day replaces that day's copy and a copy that
+    /// fails its check changes nothing. DIR is created (mode 700) if it's
+    /// missing, and the copy is mode 600.
+    ///
+    /// The copy is encrypted with the brain's key. Keep the key's backup, the
+    /// recovery code (`mnemo recovery-code`), apart from it, in a password
+    /// manager, never in DIR. Refuses a DIR inside a git working tree, the
+    /// brain's own directory, and a brain with work a process left
+    /// unfinished (`mnemo verify --recover` finishes it).
+    Backup {
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
+        path: String,
+        /// The backup directory.
+        #[arg(value_name = "DIR")]
+        to: Option<String>,
+        /// How many dated copies DIR keeps, the new one included. Older files
+        /// named `mnemo-YYYY-MM-DD.mnemo` past it are removed, and nothing
+        /// else in DIR is touched.
+        #[arg(long, default_value_t = 3)]
+        keep: usize,
+        /// `table` (default) or `json`.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
     },
     /// Embed every live memory again with a new embedder, and record its
     /// identity (12.3 step 4).
@@ -2613,6 +2664,81 @@ fn second_copy_secret(
 
 /// v0.21.0 (13.7): what `merge` did, as a table or one JSON document. An
 /// input's clock running more than an hour ahead is said on stderr too.
+/// v0.21.1: today's local date, `YYYY-MM-DD`, from the system's `date`
+/// (PowerShell's `Get-Date` on Windows), since the engine has no time-zone
+/// data. `None` if that fails or prints anything else.
+fn local_date() -> Option<String> {
+    #[cfg(windows)]
+    let out = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-Date -Format yyyy-MM-dd",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    #[cfg(not(windows))]
+    let out = std::process::Command::new("date")
+        .arg("+%Y-%m-%d")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let out = out.ok().filter(|o| o.status.success())?;
+    let d = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    let b = d.as_bytes();
+    let ok = b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b.iter()
+            .enumerate()
+            .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+    ok.then_some(d)
+}
+
+/// v0.21.1: `mnemo backup`'s report.
+fn print_backup_report(brain: &str, r: &mnemo_engine::BackupReport, format: OutputFormat) {
+    let name = |p: &std::path::Path| {
+        p.file_name().map_or_else(
+            || p.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )
+    };
+    if matches!(format, OutputFormat::Json | OutputFormat::Jsonl) {
+        let paths = |v: &[std::path::PathBuf]| -> Vec<String> {
+            v.iter().map(|p| p.display().to_string()).collect()
+        };
+        let doc = serde_json::json!({
+            "brain": brain,
+            "path": r.path.display().to_string(),
+            "bytes": r.bytes,
+            "records": r.records,
+            "verified": true,
+            "kept": paths(&r.kept),
+            "removed": paths(&r.removed),
+        });
+        println!("{doc}");
+        return;
+    }
+    let list = |v: &[std::path::PathBuf]| {
+        if v.is_empty() {
+            "none".to_string()
+        } else {
+            v.iter().map(|p| name(p)).collect::<Vec<_>>().join(", ")
+        }
+    };
+    println!("backed up {brain}");
+    println!("  to       {}", r.path.display());
+    println!("  bytes    {}", r.bytes);
+    println!(
+        "  records  {} (verified: every record decrypts and decodes)",
+        r.records
+    );
+    println!("  kept     {}", list(&r.kept));
+    println!("  removed  {}", list(&r.removed));
+}
+
 fn print_merge_report(
     a: &str,
     b: &str,
@@ -3962,6 +4088,37 @@ fn run() -> std::result::Result<(), String> {
                     report.zero_vector_manifests, report.zero_vector_memories
                 );
             }
+        }
+        Command::Backup {
+            path,
+            to,
+            keep,
+            format,
+            key_file,
+            passphrase: pp,
+        } => {
+            let dir = to.expect("shift_get_args fills it");
+            let secret = secret_for(&path, &pp, &key_file)?;
+            let mut opts = mnemo_engine::BackupOptions::default().keep(keep);
+            match local_date() {
+                Some(d) => opts = opts.date(d),
+                None => eprintln!(
+                    "note: couldn't read the local date; the copy is named by today's UTC date"
+                ),
+            }
+            let mut db = match open_ro(&path, &secret) {
+                Err(mnemo_engine::MnemoError::NeedsWriteOpen { reason }) => {
+                    return Err(format!(
+                        "backup refused: {path} has work a process left unfinished ({reason}): \
+                         `mnemo verify --recover {path}` finishes it with one read-write open, \
+                         which changes no record; then back up again"
+                    ))
+                }
+                r => r.map_err(fmt)?,
+            };
+            let report = db.backup_to(&dir, &opts).map_err(fmt)?;
+            db.close().map_err(fmt)?;
+            print_backup_report(&path, &report, format);
         }
         Command::Merge {
             a,

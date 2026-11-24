@@ -1044,7 +1044,7 @@ impl Mnemo {
     pub(super) fn open_read_only_secret(path: impl Into<PathBuf>, secret: &[u8]) -> Result<Mnemo> {
         let path: PathBuf = path.into();
         let file = open_with_lock(&path, /*write=*/ false, Create::No)?;
-        Self::read_only_from_locked(path, file, secret)
+        Self::read_only_from_locked(path, file, secret, None)
     }
 
     /// [`Mnemo::open_read_only`] through 12.4's lock layer: it waits up to
@@ -1082,12 +1082,19 @@ impl Mnemo {
     ) -> Result<Mnemo> {
         let path = absolute(path.to_path_buf());
         let file = lock_shared(&path, opts)?;
-        Self::read_only_from_locked(path, file, secret)
+        Self::read_only_from_locked(path, file, secret, None)
     }
 
     /// The read-only open's work on a file its caller holds the shared lock
-    /// on.
-    fn read_only_from_locked(path: PathBuf, mut file: LockedFile, secret: &[u8]) -> Result<Mnemo> {
+    /// on. With `held_dek` (v0.21.1, a backup checking its copy) the file is
+    /// opened with that data key, without the KDF; the header's seal still
+    /// has to verify under it.
+    pub(super) fn read_only_from_locked(
+        path: PathBuf,
+        mut file: LockedFile,
+        secret: &[u8],
+        held_dek: Option<&[u8; crypto::KEY_LEN]>,
+    ) -> Result<Mnemo> {
         let mut hbuf = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(0))?;
         file.read_exact(&mut hbuf)?;
@@ -1103,7 +1110,7 @@ impl Mnemo {
         let header = match Header::from_page(&hbuf) {
             Ok(h) => h,
             Err(parse_err) => {
-                let recoverable = scan_header_recovery_candidates(&mut file, secret, None)?;
+                let recoverable = scan_header_recovery_candidates(&mut file, secret, held_dek)?;
                 return Err(match (parse_err, recoverable) {
                     // RB-004.5 item 2: as for a pending WAL (RB-003.3), a
                     // pre-v9 file can't be opened read-write, so the advice
@@ -1167,8 +1174,13 @@ impl Mnemo {
             t_cost: header.t_cost,
             p_cost: header.p_cost,
         };
-        let kek = crypto::derive_kek(secret, &header.salt, kdf)?;
-        let dek = crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?;
+        let dek = match held_dek {
+            Some(k) => zeroize::Zeroizing::new(*k),
+            None => {
+                let kek = crypto::derive_kek(secret, &header.salt, kdf)?;
+                crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?
+            }
+        };
         header.validate_seal(&dek)?;
 
         let mut pager = Pager::new(file, dek, header.write_counter, header.version);

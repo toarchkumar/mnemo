@@ -176,6 +176,8 @@ pub use store::{
 };
 /// v0.18.0 (13a step 8b): review findings.
 pub use store::{valid_finding_id, Finding, FindingFilter, FindingSpec};
+/// v0.21.1 (G13): `mnemo backup`.
+pub use store::{BackupOptions, BackupReport};
 pub use store::{
     CloseError, CompactReport, IndexCheck, Mnemo, MnemoConfig, RecallMode, RecallRequest,
     RecallResponse, RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary,

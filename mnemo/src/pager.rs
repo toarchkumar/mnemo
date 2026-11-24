@@ -603,6 +603,12 @@ impl Pager {
         self.file.as_deref().expect(DETACHED)
     }
 
+    /// Whether the pager holds its file (a shared-mode handle holds it
+    /// only inside a call).
+    pub(crate) fn has_file(&self) -> bool {
+        self.file.is_some()
+    }
+
     /// Mutable access to the underlying file. Used by the WAL, which writes
     /// its log frames directly rather than through the page cache. Panics
     /// like [`Pager::file`].
