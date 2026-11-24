@@ -8,6 +8,19 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **`mnemo backup [PATH] <DIR>`** (and `Mnemo::backup_to`): a consistent
+  copy of the brain, still encrypted, taken under its shared lock (sessions
+  go on reading; a write waits for the copy) and checked as `verify` does
+  before it's renamed into place as `<DIR>/mnemo-YYYY-MM-DD.mnemo`. A second
+  backup the same day replaces that day's copy; `--keep N` (default 3)
+  removes the oldest dated copies past N and nothing else. DIR is created
+  700 and the copy is 600. Refuses a DIR inside a git working tree, the
+  brain's own directory, and a brain with unfinished work (`mnemo verify
+  --recover` finishes it). The guide has a short "Back up the brain"
+  section: the key's backup is the recovery code, kept apart (v0211-1, G13)
+
 ## [0.21.0] — 2026-11-23
 
 Two copies of one brain become one again. `mnemo merge <a> <b> -o <out>`

@@ -2493,3 +2493,49 @@ fn a_closed_pipe_exits_quietly() {
     #[cfg(not(unix))]
     assert_eq!(o.status.code(), Some(1), "{err}");
 }
+
+/// v0.21.1 (G13): `mnemo backup [PATH] <DIR>` prints the copy, its size and
+/// records, what it kept and removed; `--format json` the same fields. The
+/// copy opens and verifies. With no arguments it says it needs a directory.
+#[test]
+fn backup_table_and_json() {
+    let (dir, path, pp, _) = seed_db();
+    let p = path.to_str().unwrap();
+    let out = dir.path().join("backups");
+    let o = out.to_str().unwrap();
+    let (status, stdout, stderr) = run_cli(&["backup", p, o], pp);
+    assert!(status.success(), "{stderr}");
+    assert!(stdout.contains(&format!("backed up {p}")), "{stdout}");
+    assert!(stdout.contains("records  3 (verified"), "{stdout}");
+    assert!(stdout.contains("removed  none"), "{stdout}");
+    let copies: Vec<_> = std::fs::read_dir(&out).unwrap().collect();
+    assert_eq!(copies.len(), 1);
+
+    let (status, stdout, stderr) =
+        run_cli(&["backup", p, o, "--keep", "1", "--format", "json"], pp);
+    assert!(status.success(), "{stderr}");
+    let j: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(j["records"], 3);
+    assert_eq!(j["verified"], true);
+    assert_eq!(j["kept"].as_array().unwrap().len(), 1);
+    assert_eq!(j["kept"][0], j["path"]);
+    assert_eq!(j["removed"].as_array().unwrap().len(), 0);
+    let copy = j["path"].as_str().unwrap();
+    let name = std::path::Path::new(copy)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        name.starts_with("mnemo-") && name.ends_with(".mnemo") && name.len() == 22,
+        "{name}"
+    );
+    assert_eq!(j["bytes"], std::fs::metadata(copy).unwrap().len());
+    let mut db = Mnemo::open_read_only(copy, pp).unwrap();
+    assert_eq!(db.verify().unwrap(), 3);
+
+    // (A lone argument is the directory, for the project brain; with none:)
+    let (status, _, stderr) = run_cli(&["backup"], pp);
+    assert!(!status.success());
+    assert!(stderr.contains("`backup` needs a directory"), "{stderr}");
+}

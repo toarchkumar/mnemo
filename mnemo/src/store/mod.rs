@@ -80,6 +80,7 @@ pub use coordination::{
 pub use findings::{valid_finding_id, Finding, FindingFilter, FindingSpec};
 
 mod ann;
+mod backup;
 mod cache_api;
 mod catchup;
 mod continuation;
@@ -1177,6 +1178,59 @@ pub struct ReembedReport {
     pub from: Option<crate::EmbedderIdentity>,
     /// The identity it records now.
     pub to: crate::EmbedderIdentity,
+}
+
+/// v0.21.1 (G13): options for [`Mnemo::backup_to`].
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct BackupOptions {
+    /// How many dated copies (`mnemo-YYYY-MM-DD.mnemo`) the directory keeps,
+    /// the new one included; at least 1. Default 3.
+    pub keep: usize,
+    /// The date the copy is named by, `YYYY-MM-DD` (`None`: today's date in
+    /// UTC). The `mnemo` CLI passes the local date.
+    pub date: Option<String>,
+}
+
+impl Default for BackupOptions {
+    fn default() -> Self {
+        BackupOptions {
+            keep: 3,
+            date: None,
+        }
+    }
+}
+
+impl BackupOptions {
+    /// Keep `n` dated copies, the new one included.
+    pub fn keep(mut self, n: usize) -> Self {
+        self.keep = n;
+        self
+    }
+
+    /// Name the copy by `date` (`YYYY-MM-DD`).
+    pub fn date(mut self, date: impl Into<String>) -> Self {
+        self.date = Some(date.into());
+        self
+    }
+}
+
+/// v0.21.1 (G13): what [`Mnemo::backup_to`] wrote, checked and removed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BackupReport {
+    /// The copy: `<dir>/mnemo-YYYY-MM-DD.mnemo`.
+    pub path: PathBuf,
+    /// Its size in bytes.
+    pub bytes: u64,
+    /// Records the check decrypted and decoded in the copy (as
+    /// [`VerifyReport::records`] counts them).
+    pub records: usize,
+    /// The dated copies the directory keeps, newest first, the new one
+    /// included.
+    pub kept: Vec<PathBuf>,
+    /// The older dated copies removed past `keep`.
+    pub removed: Vec<PathBuf>,
 }
 
 /// What [`Mnemo::verify_report`] checked.

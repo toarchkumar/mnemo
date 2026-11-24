@@ -346,6 +346,23 @@ rows are deleted. And when it writes a key this build wrote in that copy
 while the copy's clock ran ahead, the merge may put its version first,
 since an older build's write has no stamp to say it came after.
 
+### Back up the brain
+
+`mnemo backup` copies the brain into a folder outside the repository, and
+checks the copy:
+
+```sh test
+mnemo backup ~/mnemo-backup
+```
+
+The copy is named by the date, `mnemo-YYYY-MM-DD.mnemo`: a second backup
+the same day replaces it, and the folder keeps the newest three
+(`--keep`). Sessions can keep running: they go on reading, and a write
+waits for the copy. The copy is encrypted with the brain's key, which
+stays in this machine's key store. So back up the key apart from it: run
+`mnemo recovery-code` and keep the code in a password manager, never in
+the backup folder. On another machine, `mnemo unlock` takes the code.
+
 ## 5. Hooks and MCP extras
 
 `onboard` installs four hooks: `mnemo hook session-start`, `mnemo hook
