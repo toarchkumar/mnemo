@@ -8,6 +8,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.21.1] — 2026-11-24
+
+A patch on 0.21.0. `mnemo backup` makes a checked, encrypted copy of a
+brain while sessions keep using it. `mnemo task take <slug>` and `mnemo
+task update --after` let agents take the task a message names and change
+a task's order. The plugin for Claude Code gains a launcher and the
+directory's fields, and plugins for Gemini CLI, Codex and Antigravity
+join it. No format change. The Swift and Android packages aren't
+published in this release: they stay at 0.20.0.
+
 ### Added
 
 - **`mnemo backup [PATH] <DIR>`** (and `Mnemo::backup_to`): a consistent
@@ -29,7 +39,6 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `Mnemo::task_set_after`, the MCP `update` with `after`): a task's creator
   changes what it waits for, refusing a cycle; the change is a note in its
   history (v0211-2, G17)
-
 - **Plugins for Gemini CLI, Codex and Antigravity**, beside the Claude
   Code plugin: `gemini-extension.json` at the root (Gemini CLI installs
   the repository), a Codex marketplace (`.agents/plugins/marketplace.json`,
@@ -51,6 +60,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   author, an icon, the hosts it reaches (`huggingface.co`, the built-in
   model's one-time download) and links; each plugin's README says what it
   runs and what leaves the machine (v0211-3)
+- The site's headline is "Every agent you run, remembering and
+  coordinating as one", with the social card to match
+  (handoff-site-headline)
 
 ## [0.21.0] — 2026-11-23
 
@@ -5454,7 +5466,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/toarchkumar/mnemo/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/toarchkumar/mnemo/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/toarchkumar/mnemo/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/toarchkumar/mnemo/compare/v0.20.0...v0.20.1
