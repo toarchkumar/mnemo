@@ -2495,7 +2495,8 @@ fn a_closed_pipe_exits_quietly() {
 }
 
 /// v0.21.1 (G13): `mnemo backup [PATH] <DIR>` prints the copy, its size and
-/// records, what it kept and removed; `--format json` the same fields. The
+/// records, what it kept and removed, and whether it replaced that day's
+/// copy (v0211-6b); `--format json` the same fields. The
 /// copy opens and verifies. With no arguments it says it needs a directory.
 #[test]
 fn backup_table_and_json() {
@@ -2508,8 +2509,23 @@ fn backup_table_and_json() {
     assert!(stdout.contains(&format!("backed up {p}")), "{stdout}");
     assert!(stdout.contains("records  3 (verified"), "{stdout}");
     assert!(stdout.contains("removed  none"), "{stdout}");
+    assert!(!stdout.contains("replaced"), "{stdout}");
     let copies: Vec<_> = std::fs::read_dir(&out).unwrap().collect();
     assert_eq!(copies.len(), 1);
+    let first = copies[0].as_ref().unwrap().path();
+
+    // The same day again: the table says it replaced that day's copy.
+    let (status, stdout, stderr) = run_cli(&["backup", p, o], pp);
+    assert!(status.success(), "{stderr}");
+    let name = first.file_name().unwrap().to_str().unwrap();
+    if out.join(name).exists() && std::fs::read_dir(&out).unwrap().count() == 1 {
+        assert!(
+            stdout.contains(&format!(
+                "  replaced {name} (the earlier copy from that date)"
+            )),
+            "{stdout}"
+        );
+    }
 
     let (status, stdout, stderr) =
         run_cli(&["backup", p, o, "--keep", "1", "--format", "json"], pp);
@@ -2517,6 +2533,11 @@ fn backup_table_and_json() {
     let j: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(j["records"], 3);
     assert_eq!(j["verified"], true);
+    // Replaced unless the date changed between the runs.
+    assert_eq!(
+        j["replaced"],
+        std::path::Path::new(j["path"].as_str().unwrap()) == out.join(name)
+    );
     assert_eq!(j["kept"].as_array().unwrap().len(), 1);
     assert_eq!(j["kept"][0], j["path"]);
     assert_eq!(j["removed"].as_array().unwrap().len(), 0);

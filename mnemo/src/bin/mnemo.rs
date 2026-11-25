@@ -2727,6 +2727,7 @@ fn print_backup_report(brain: &str, r: &mnemo_engine::BackupReport, format: Outp
             "bytes": r.bytes,
             "records": r.records,
             "verified": true,
+            "replaced": r.replaced,
             "kept": paths(&r.kept),
             "removed": paths(&r.removed),
         });
@@ -2742,6 +2743,12 @@ fn print_backup_report(brain: &str, r: &mnemo_engine::BackupReport, format: Outp
     };
     println!("backed up {brain}");
     println!("  to       {}", r.path.display());
+    if r.replaced {
+        println!(
+            "  replaced {} (the earlier copy from that date)",
+            name(&r.path)
+        );
+    }
     println!("  bytes    {}", r.bytes);
     println!(
         "  records  {} (verified: every record decrypts and decodes)",

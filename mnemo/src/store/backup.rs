@@ -61,8 +61,8 @@ impl Mnemo {
             ));
         }
 
-        // Where the copy goes.
-        let dir = absolute(dir.as_ref().to_path_buf());
+        // Where the copy goes, absolute and without `.` or `..` segments.
+        let dir = normalised(dir.as_ref())?;
         let mut probe = dir.as_path();
         while std::fs::symlink_metadata(probe).is_err() {
             probe = match probe.parent() {
@@ -79,7 +79,7 @@ impl Mnemo {
                 "{} is inside a git working tree ({}), where a copy could be committed; \
                  choose a directory outside it",
                 dir.display(),
-                top.display()
+                plain(top).display()
             )));
         }
         if dir.exists() {
@@ -168,6 +168,8 @@ impl Mnemo {
                 )));
             }
         };
+        // A copy from the same date is replaced; the report says so.
+        let replaced = std::fs::symlink_metadata(&dest).is_ok_and(|m| m.is_file());
         if let Err(e) = std::fs::rename(&tmp, &dest) {
             let _ = std::fs::remove_file(&tmp);
             return Err(MnemoError::Io(e));
@@ -213,9 +215,65 @@ impl Mnemo {
             path: dest,
             bytes,
             records,
+            replaced,
             kept,
             removed,
         })
+    }
+}
+
+/// `dir` made absolute, without `.` or `..` segments, so a message names the
+/// directory plainly. A `.` never changes where a path leads, so it's dropped
+/// as written. A `..` follows symlinks as the system does, so a path with one
+/// is resolved: its longest existing part through `canonicalize`, and the
+/// part not created yet as written.
+fn normalised(dir: &Path) -> Result<PathBuf> {
+    use std::path::Component;
+    // `components` drops a `.` anywhere but at the start.
+    let dir: PathBuf = absolute(dir.to_path_buf())
+        .components()
+        .filter(|c| *c != Component::CurDir)
+        .collect();
+    if !dir.components().any(|c| c == Component::ParentDir) {
+        return Ok(dir);
+    }
+    let mut probe = dir.as_path();
+    while std::fs::symlink_metadata(probe).is_err() {
+        match probe.parent() {
+            Some(p) => probe = p,
+            None => break,
+        }
+    }
+    let mut out = plain(&std::fs::canonicalize(probe)?);
+    for c in dir
+        .strip_prefix(probe)
+        .unwrap_or(Path::new(""))
+        .components()
+    {
+        match c {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(n) => out.push(n),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// `p` without Windows' verbatim prefix (`\\?\C:\…`, from `canonicalize`),
+/// which a person doesn't expect to read; a path that needs it (260
+/// characters or more) keeps it.
+fn plain(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.len() < 260 && rest.as_bytes().get(1) == Some(&b':') => {
+            PathBuf::from(rest)
+        }
+        _ => p.to_path_buf(),
     }
 }
 
@@ -267,5 +325,23 @@ mod tests {
         ] {
             assert!(!is_backup_name(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn plain_paths() {
+        assert_eq!(
+            plain(Path::new(r"\\?\C:\Users\a\b")),
+            PathBuf::from(r"C:\Users\a\b")
+        );
+        assert_eq!(
+            plain(Path::new(r"\\?\UNC\srv\share\a")),
+            PathBuf::from(r"\\srv\share\a")
+        );
+        assert_eq!(plain(Path::new("/home/a/b")), PathBuf::from("/home/a/b"));
+        #[cfg(unix)]
+        assert_eq!(
+            normalised(Path::new("/x/./y/./z")).unwrap(),
+            PathBuf::from("/x/y/z")
+        );
     }
 }
