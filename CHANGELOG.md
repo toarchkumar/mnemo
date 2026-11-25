@@ -24,11 +24,13 @@ published in this release: they stay at 0.20.0.
   copy of the brain, still encrypted, taken under its shared lock (sessions
   go on reading; a write waits for the copy) and checked as `verify` does
   before it's renamed into place as `<DIR>/mnemo-YYYY-MM-DD.mnemo`. A second
-  backup the same day replaces that day's copy; `--keep N` (default 3)
-  removes the oldest dated copies past N and nothing else. DIR is created
-  700 and the copy is 600. Refuses a DIR inside a git working tree, the
-  brain's own directory, and a brain with unfinished work (`mnemo verify
-  --recover` finishes it). The guide has a short "Back up the brain"
+  backup the same day replaces that day's copy, and the report says so (a
+  `replaced` line; `"replaced": true` in JSON, `BackupReport::replaced`);
+  `--keep N` (default 3) removes the oldest dated copies past N and nothing
+  else. DIR is created 700 and the copy is 600. Refuses a DIR inside a git
+  working tree, the brain's own directory, and a brain with unfinished
+  work (`mnemo verify --recover` finishes it); a refusal names DIR as an
+  absolute path without `.` or `..` segments (v0211-6b). The guide has a short "Back up the brain"
   section: the key's backup is the recovery code, kept apart (v0211-1, G13)
 - **`mnemo task take <slug>`** (and `Mnemo::task_take`, the MCP `task`
   tool's `take`): take the task a pointer names, as `task next` takes one,

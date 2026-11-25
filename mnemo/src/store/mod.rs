@@ -1226,6 +1226,9 @@ pub struct BackupReport {
     /// Records the check decrypted and decoded in the copy (as
     /// [`VerifyReport::records`] counts them).
     pub records: usize,
+    /// Whether the copy replaced an earlier one of the same name (a backup
+    /// taken earlier the same date).
+    pub replaced: bool,
     /// The dated copies the directory keeps, newest first, the new one
     /// included.
     pub kept: Vec<PathBuf>,

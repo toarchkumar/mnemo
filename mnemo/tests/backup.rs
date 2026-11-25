@@ -142,12 +142,14 @@ fn a_second_backup_the_same_day_replaces_that_days_copy() {
     let opts = BackupOptions::default().date("2026-11-24");
     let first = backup(&path, &out, &opts).unwrap();
     assert_eq!(memories_in(&first.path), 3);
+    assert!(!first.replaced);
     let mut db = Mnemo::open(&path, PW).unwrap();
     db.remember(Memory::new("one more", MemoryType::Semantic, v(9.0)))
         .unwrap();
     db.close().unwrap();
     let second = backup(&path, &out, &opts).unwrap();
     assert_eq!(second.path, first.path);
+    assert!(second.replaced);
     assert_eq!(second.kept, vec![first.path.clone()]);
     assert!(second.removed.is_empty());
     assert_eq!(memories_in(&second.path), 4);
@@ -250,6 +252,21 @@ fn the_refusals() {
         assert!(e.contains("inside a git working tree"), "{e}");
         assert!(!dir.exists(), "{} was created", dir.display());
     }
+    // The message names the directory absolute and plain: a `.` is dropped,
+    // a `..` resolved, and nothing is created on the way.
+    let e = refused(&repo.join(".").join("backups"), &BackupOptions::default());
+    assert!(
+        e.contains(&format!("{} is inside", repo.join("backups").display())),
+        "{e}"
+    );
+    let e = refused(&repo.join("a/../backups"), &BackupOptions::default());
+    assert!(!e.contains(".."), "{e}");
+    #[cfg(unix)]
+    {
+        let real = std::fs::canonicalize(&repo).unwrap().join("backups");
+        assert!(e.contains(&format!("{} is inside", real.display())), "{e}");
+    }
+    assert!(!repo.join("a").exists());
     // A worktree's `.git` is a file.
     let wt = tmp.path().join("worktree");
     std::fs::create_dir(&wt).unwrap();
