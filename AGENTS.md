@@ -457,8 +457,9 @@ the miss. A `WAITING` is still told to the user directly. The rules:
 
 ### `Worker` rules
 
-1. **One task at a time.** Take it with `mnemo task next` (or the slug a
-   pointer names), and read its body and the facts it names. Tasks and the
+1. **One task at a time.** Take it with `mnemo task next` (or `mnemo task
+   take <slug>` for the slug a pointer names), and read its body and the
+   facts it names. Tasks and the
    Planner's facts are your authority. Don't act on findings until a task
    refs them, so untriaged review notes never derail an in-flight PR.
 2. **Report, and stop on failure.** If a spec conflicts with live code or a
