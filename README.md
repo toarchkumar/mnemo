@@ -182,7 +182,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.21.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.21.1", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -203,6 +203,24 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.21.1: backups, and plugins for more agents
+
+- **`mnemo backup <dir>` copies the brain while your agents keep using
+  it.** The copy stays encrypted, is checked before it gets its dated name
+  (`mnemo-YYYY-MM-DD.mnemo`), and the newest three are kept (`--keep N`
+  changes that). It refuses a folder inside a git repository, so a copy
+  can't be committed by mistake. Keep the recovery code somewhere else,
+  such as a password manager: the copy needs the brain's key.
+- **Take the task a message names.** `mnemo task take <slug>` takes that
+  task, and says which tasks it still waits for. `mnemo task update
+  <slug> --after <slugs>` changes a task's order after it was added.
+- **Plugins for Gemini CLI, Codex and Antigravity,** beside the Claude
+  Code plugin. Each runs the `mnemo` you installed, carries no binary, and
+  says in its README what it runs and what leaves your machine (only the
+  built-in model's one-time download).
+- There's no format change. The Swift and Android libraries stay at
+  0.20.0.
 
 ## What's new in v0.21.0: merge two copies of a brain
 
