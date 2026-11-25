@@ -491,7 +491,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <a class="pill" href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md"><span class="dot"></span>v0.21.0</a>
+        <a class="pill" href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md"><span class="dot"></span>v0.21.1</a>
         <span class="pill">Free and open source · Apache-2.0</span>
         <span class="pill">Claude Code · Cursor · any MCP client</span>
       </div>
@@ -782,7 +782,7 @@ staging-7 environment and is owned by the payments team.</pre>
       <div class="card stat"><div class="v">~1.5<span> KB</span></div><div class="l">Disk per memory</div><div class="d">About 6 times smaller than before v0.11's format. Memories share pages, vectors are stored at half precision, and week-old session turns are compressed. Our own brain: about 26,000 memories in 45 MB.</div></div>
     </div>
     <div class="proof" aria-label="Project facts">
-      <span><b>40</b> tagged releases</span>
+      <span><b>41</b> tagged releases</span>
       <span>Memory-safe core, <b>no unsafe code</b></span>
       <span>On <b>PyPI</b>, <b>crates.io</b>, <b>Swift PM</b> and <b>Maven Central</b></span>
       <span>Built using its own memory</span>
@@ -796,7 +796,7 @@ staging-7 environment and is owned by the payments team.</pre>
     <div class="head">
       <p class="eyebrow">Also a library</p>
       <h2 class="title">Memory and a cache for your own agents</h2>
-      <p class="lead">The same engine runs inside your app, in Python, Rust, Swift and Kotlin, with a result cache for LLM and tool calls. These examples use v0.21.0. Phone guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
+      <p class="lead">The same engine runs inside your app, in Python, Rust, Swift and Kotlin, with a result cache for LLM and tool calls. These examples use v0.21.1. Phone guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
       <div class="chips" aria-label="Packages">
         <span class="chip on">pip install mnemo-engine</span><span class="chip on">cargo add mnemo-engine</span>
         <span class="chip">io.github.toarchkumar:mnemo-android</span><span class="chip">toarchkumar/mnemo-swift</span>
@@ -821,7 +821,7 @@ staging-7 environment and is owned by the payments team.</pre>
         print(round(hit[<span class="s">"score"</span>], <span class="n">3</span>), hit[<span class="s">"content"</span>])
 
     <span class="c"># A fact that changes: the key replaces the old version, history is kept</span>
-    db.remember_text(<span class="s">"the current release is v0.21.0"</span>, <span class="s">"semantic"</span>, key=<span class="s">"current-release"</span>)
+    db.remember_text(<span class="s">"the current release is v0.21.1"</span>, <span class="s">"semantic"</span>, key=<span class="s">"current-release"</span>)
 
     <span class="c"># Cache an expensive call</span>
     prompt = <span class="s">"Summarize the release notes"</span>
@@ -885,6 +885,7 @@ staging-7 environment and is owned by the payments team.</pre>
         <h3>Shipped recently <span class="status done">v0.13 – v0.21</span></h3>
         <ul>
           <li>Merging two copies of a brain: <code>mnemo merge</code> keeps every change, flags edits made in both, and gives the same file in any order</li>
+          <li>Plugins for Claude Code, Gemini CLI, Codex and Antigravity, and <code>mnemo backup</code> for a checked, encrypted copy while agents keep working</li>
           <li>Agents coordinating on one machine: a task queue with dependencies, an inbox and claims, in the same encrypted file</li>
           <li>Review findings kept in the brain, and a backup of it you can commit to git</li>
           <li>One-command setup for Claude Code and Cursor, with hooks that load and save the memory, and an install script that checks what it downloads</li>
