@@ -1,6 +1,6 @@
 {
   "name": "mnemo",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "This project's memory: the mnemo MCP server on one encrypted file in your repository, and a skill on when to recall and remember",
   "mcpServers": {
     "mnemo": {

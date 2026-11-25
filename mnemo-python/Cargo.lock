@@ -1251,7 +1251,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mnemo-engine"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "aes-gcm",
  "apple-native-keyring-store",
@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "mnemo-python"
-version = "0.21.0"
+version = "0.21.1"
 dependencies = [
  "mnemo-engine",
  "pyo3",
