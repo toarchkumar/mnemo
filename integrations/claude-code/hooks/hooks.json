@@ -3,28 +3,28 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "mnemo hook session-start --client claude-code", "timeout": 15 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/mnemo.sh\" hook session-start --client claude-code", "timeout": 15 }
         ]
       }
     ],
     "PreCompact": [
       {
         "hooks": [
-          { "type": "command", "command": "mnemo hook pre-compact --client claude-code", "timeout": 30 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/mnemo.sh\" hook pre-compact --client claude-code", "timeout": 30 }
         ]
       }
     ],
     "SessionEnd": [
       {
         "hooks": [
-          { "type": "command", "command": "mnemo hook session-end --client claude-code", "timeout": 30 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/mnemo.sh\" hook session-end --client claude-code", "timeout": 30 }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "mnemo hook user-prompt --client claude-code", "timeout": 10 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/mnemo.sh\" hook user-prompt --client claude-code", "timeout": 10 }
         ]
       }
     ]

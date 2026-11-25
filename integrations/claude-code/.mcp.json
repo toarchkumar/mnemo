@@ -2,7 +2,7 @@
   "mcpServers": {
     "mnemo": {
       "type": "stdio",
-      "command": "mnemo",
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/mnemo.sh",
       "args": ["serve", "--mcp", "--shared"]
     }
   }

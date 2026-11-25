@@ -1,0 +1,16 @@
+{
+  "name": "mnemo",
+  "version": "0.21.0",
+  "description": "This project's memory: the mnemo MCP server on one encrypted file in your repository, and a skill on when to recall and remember",
+  "mcpServers": {
+    "mnemo": {
+      "command": "${extensionPath}${/}integrations${/}gemini${/}scripts${/}mnemo.sh",
+      "args": [
+        "serve",
+        "--mcp",
+        "--shared"
+      ]
+    }
+  },
+  "contextFileName": "integrations/gemini/GEMINI.md"
+}

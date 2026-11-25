@@ -30,10 +30,27 @@ Pre-1.0, the minor component carries the breaking-change signal.
   changes what it waits for, refusing a cycle; the change is a note in its
   history (v0211-2, G17)
 
+- **Plugins for Gemini CLI, Codex and Antigravity**, beside the Claude
+  Code plugin: `gemini-extension.json` at the root (Gemini CLI installs
+  the repository), a Codex marketplace (`.agents/plugins/marketplace.json`,
+  the plugin in `integrations/codex/`) and `integrations/antigravity/`.
+  Each has the MCP server and the guide's skill (Gemini: its context file);
+  none has hooks, which speak Claude Code's and Cursor's formats only
+  (v0211-3)
+
 ### Changed
 
 - The guide says a task or finding a merge renamed (`<name>-merge-2`)
   stays flagged while the rename stands, as the 0.21.0 notes do (v0211-2)
+- **Every plugin runs `mnemo` through a launcher in the plugin,**
+  `scripts/mnemo.sh`: `$MNEMO_BIN`, `mnemo` on the PATH, then
+  `~/.local/bin` and `~/.cargo/bin`, which an app started from the Dock
+  may not have on its PATH; without one it says how to install `mnemo`,
+  and a hook still exits 0. The Claude Code plugin's server and hooks run
+  it from `${CLAUDE_PLUGIN_ROOT}`, and its manifest gains the version, the
+  author, an icon, the hosts it reaches (`huggingface.co`, the built-in
+  model's one-time download) and links; each plugin's README says what it
+  runs and what leaves the machine (v0211-3)
 
 ## [0.21.0] — 2026-11-23
 

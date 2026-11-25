@@ -107,6 +107,10 @@ pinned to a commit (Dependabot keeps them current).
    - the root `server.json` (the MCP registry's): its `version` and the
      bundle URL in `packages` (`.../download/vX.Y.Z/mnemo-vX.Y.Z.mcpb`);
      `tests/release_names.rs` checks both;
+   - the plugins' manifests (v0211-3): `version` in
+     `integrations/claude-code/.claude-plugin/plugin.json`,
+     `gemini-extension.json`, `integrations/codex/plugin.json` and
+     `integrations/antigravity/plugin.json`; `tests/plugins.rs` checks them;
    - the samples (`MARKETING_VERSION` in `examples/mobile/ios/project.yml`,
      and the `mnemo-android` version in the Android sample).
 2. **The changelog.** Cut `[Unreleased]` into `[X.Y.Z] - <date>`.

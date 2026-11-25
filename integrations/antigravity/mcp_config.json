@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mnemo": {
+      "command": "sh",
+      "args": [
+        "${PLUGIN_ROOT}/scripts/mnemo.sh",
+        "serve",
+        "--mcp",
+        "--shared"
+      ]
+    }
+  }
+}

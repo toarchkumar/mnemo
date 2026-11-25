@@ -226,6 +226,9 @@ jobs:
       # v0200-d3: the MCP bundle's build script and launcher.
       - name: shellcheck the MCP bundle scripts
         run: shellcheck --shell=sh integrations/mcpb/build.sh integrations/mcpb/mnemo.sh
+      # v0211-3: the plugins' launcher (one file, copied into each plugin).
+      - name: shellcheck the plugins' launchers
+        run: shellcheck --shell=sh integrations/*/scripts/mnemo.sh
       - name: Parse install.ps1
         shell: pwsh
         run: |
